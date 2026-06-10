@@ -23,10 +23,10 @@ export default function Home() {
 
       <div className="mt-10 flex items-center gap-4">
         <Link
-          href="/events"
+          href="/dashboard"
           className="rounded-md bg-green px-6 py-3 font-bold text-black transition hover:-translate-y-0.5 hover:bg-green-deep"
         >
-          Ver eventos
+          Abrir o app (demo)
         </Link>
         <Link
           href="/login"

@@ -1,9 +1,12 @@
-// Shell da área logada. Reservado: sidebar (--sidebar-w: 252px) + topbar (--topbar-h: 68px),
-// conforme tokens de layout em globals.css — implementação na fase do MVP.
+import "./app.css";
+import { AppShell } from "@/components/app/shell";
+
+// Área logada — shell portado do protótipo (sidebar 252px + topbar 68px,
+// estilos em ./app.css). Dados ainda são demo; Supabase entra na fase do schema.
 export default function AppLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  return <main className="flex flex-1 flex-col">{children}</main>;
+  return <AppShell>{children}</AppShell>;
 }

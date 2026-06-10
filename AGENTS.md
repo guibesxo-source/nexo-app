@@ -8,7 +8,9 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 App real do **Nexo** (SaaS de gestão de eventos) — Next.js (App Router) + Supabase + Vercel + Stripe. Repo irmão do protótipo/LP `guibesxo-source/nexo` (local: `C:\Users\guibess\Desktop\Nexo`), onde vivem os docs de produto (`docs/01–11`).
 
-**Projeto pessoal do Guilherme Bessa** (solo founder). Estado: **F1 — esqueleto**; sem schema/auth/billing ainda.
+**Projeto pessoal do Guilherme Bessa** (solo founder). Estado: **F1 — esqueleto + UI demo portada**; sem schema/auth/billing ainda.
+
+> A UI da área logada foi **portada do protótipo** (repo `nexo`, `app/*.jsx`): shell em `components/app/shell.tsx`, kit em `components/app/kit.tsx`, views em `components/app/views/*`, estilos legados em `app/(app)/app.css`, dados demo em `lib/demo-data.ts`. As views mantêm o estilo `createElement (h)` do original — migrar para JSX idiomático aos poucos, quando cada view ganhar dados reais via `@/lib/db`.
 
 ## ⚠️ Separação Prolog × Nexo (REGRA CRÍTICA)
 
