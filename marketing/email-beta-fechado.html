@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="pt-BR" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <title>Você foi convidado para o beta fechado do Nexo</title>
+  <!--
+    Nexo — Email de convite para o beta fechado
+    Identidade: dark (painel de marca do login) · verde #00E47C único acento · CTA verde com texto preto
+    Tipografia: Inter, headings 800 / tracking -0.03em · Raios 8/12/16/22
+    Placeholders: {{CTA_URL}} · {{NOME}} · {{UNSUBSCRIBE_URL}}
+    Assunto sugerido: Seu acesso antecipado ao Nexo chegou 🎟️
+    Pré-header: definido abaixo (texto oculto)
+  -->
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
+    body { margin: 0; padding: 0; -webkit-text-size-adjust: 100%; }
+    table { border-collapse: collapse; }
+    img { border: 0; line-height: 100%; }
+    a { text-decoration: none; }
+    @media only screen and (max-width: 620px) {
+      .container { width: 100% !important; }
+      .px { padding-left: 24px !important; padding-right: 24px !important; }
+      .h1 { font-size: 30px !important; line-height: 1.1 !important; }
+      .col { display: block !important; width: 100% !important; }
+      .col-gap { display: none !important; }
+      .card-spacer { height: 12px !important; }
+    }
+  </style>
+</head>
+<body style="margin:0; padding:0; background-color:#0a0a0a;">
+
+  <!-- Pré-header (oculto) -->
+  <div style="display:none; max-height:0; overflow:hidden; mso-hide:all;">
+    Vagas limitadas: inscritos, checklist e financeiro dos seus eventos num só painel — em tempo real.&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;
+  </div>
+
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#0a0a0a">
+    <tr>
+      <td align="center" style="padding: 32px 16px 48px;">
+
+        <table role="presentation" class="container" width="600" cellpadding="0" cellspacing="0" style="width:600px; max-width:600px;">
+
+          <!-- Topo: marca -->
+          <tr>
+            <td class="px" style="padding: 8px 40px 24px;">
+              <table role="presentation" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td valign="middle" style="padding-right: 11px;">
+                    <table role="presentation" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td align="center" valign="middle" width="34" height="34" style="width:34px; height:34px; background-color:#000000; border:1px solid rgba(255,255,255,0.16); border-radius:10px;">
+                          <span style="display:inline-block; width:12px; height:12px; border-radius:99px; background-color:#00e47c; box-shadow: 0 0 0 3px #000000, 0 0 0 4.5px #00e47c;">&nbsp;</span>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                  <td valign="middle" style="font-family: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif; font-size: 21px; font-weight: 800; letter-spacing: -0.03em; color: #ffffff;">
+                    Nexo
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Hero dark com glow -->
+          <tr>
+            <td style="border-radius: 22px; background-color: #050505; background-image: radial-gradient(circle at 12% 0%, rgba(0,228,124,0.22), transparent 55%), radial-gradient(circle at 95% 100%, rgba(0,184,99,0.16), transparent 55%); border: 1px solid rgba(255,255,255,0.10);">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td class="px" style="padding: 44px 40px 40px;">
+
+                    <!-- Badge -->
+                    <table role="presentation" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="padding: 8px 16px; border-radius: 99px; border: 1px solid rgba(0,228,124,0.35); background-color: rgba(0,228,124,0.08); font-family: Inter, system-ui, sans-serif; font-size: 11.5px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: #00e47c;">
+                          <span style="display:inline-block; width:6px; height:6px; border-radius:99px; background-color:#00e47c; vertical-align:middle; margin-right:8px;">&nbsp;</span>Beta fechado · Convite pessoal
+                        </td>
+                      </tr>
+                    </table>
+
+                    <!-- Headline -->
+                    <div class="h1" style="margin: 22px 0 0; font-family: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif; font-size: 38px; line-height: 1.18; font-weight: 800; letter-spacing: -0.03em; color: #ffffff;">
+                      O hub que faz<br />
+                      <span style="display:inline-block; background-color:#00e47c; color:#000000; padding: 2px 14px 5px; border-radius: 6px; transform: rotate(-2deg); margin: 4px 0;">os seus eventos</span><br />
+                      acontecerem.
+                    </div>
+
+                    <!-- Subcopy -->
+                    <div style="margin: 16px 0 0; font-family: Inter, system-ui, sans-serif; font-size: 15px; line-height: 1.6; color: rgba(255,255,255,0.62); max-width: 430px;">
+                      Olá, {{NOME}} — você está entre as primeiras pessoas convidadas a testar o Nexo: inscritos, checklist e financeiro de cada evento num só painel, em tempo real. Sem planilhas espalhadas, sem caos.
+                    </div>
+
+                    <!-- Chips (como no painel do login) -->
+                    <table role="presentation" cellpadding="0" cellspacing="0" style="margin-top: 26px;">
+                      <tr>
+                        <td style="padding: 10px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.12); background-color: rgba(255,255,255,0.06); font-family: Inter, system-ui, sans-serif; font-size: 13px; font-weight: 600; color: #ffffff;">
+                          🎫 +128 inscritos esta semana
+                        </td>
+                      </tr>
+                      <tr><td style="height: 10px; line-height: 10px; font-size: 0;">&nbsp;</td></tr>
+                      <tr>
+                        <td style="padding: 0 0 0 28px;">
+                          <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+                            <td style="padding: 10px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.12); background-color: rgba(255,255,255,0.06); font-family: Inter, system-ui, sans-serif; font-size: 13px; font-weight: 600; color: #ffffff;">
+                              ✅ Checklist 86% concluído
+                            </td>
+                          </tr></table>
+                        </td>
+                      </tr>
+                      <tr><td style="height: 10px; line-height: 10px; font-size: 0;">&nbsp;</td></tr>
+                      <tr>
+                        <td style="padding: 0 0 0 10px;">
+                          <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+                            <td style="padding: 10px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.12); background-color: rgba(255,255,255,0.06); font-family: Inter, system-ui, sans-serif; font-size: 13px; font-weight: 600; color: #ffffff;">
+                              💰 Orçamento no plano
+                            </td>
+                          </tr></table>
+                        </td>
+                      </tr>
+                    </table>
+
+                    <!-- CTA -->
+                    <table role="presentation" cellpadding="0" cellspacing="0" style="margin-top: 32px;">
+                      <tr>
+                        <td align="center" style="border-radius: 12px; background-color: #00e47c;">
+                          <a href="{{CTA_URL}}" target="_blank" style="display: inline-block; padding: 14px 30px; font-family: Inter, system-ui, sans-serif; font-size: 15px; font-weight: 700; letter-spacing: -0.01em; color: #000000; border-radius: 12px;">
+                            Garantir minha vaga no beta&nbsp;&nbsp;→
+                          </a>
+                        </td>
+                      </tr>
+                    </table>
+
+                    <div style="margin-top: 14px; font-family: Inter, system-ui, sans-serif; font-size: 12.5px; color: rgba(255,255,255,0.40);">
+                      Vagas limitadas nesta primeira turma · acesso gratuito durante o beta
+                    </div>
+
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <tr><td style="height: 16px; line-height: 16px; font-size: 0;">&nbsp;</td></tr>
+
+          <!-- Features: 2 colunas -->
+          <tr>
+            <td>
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td class="col" width="292" valign="top" style="border-radius: 16px; background-color: #111111; border: 1px solid rgba(255,255,255,0.10); padding: 24px;">
+                    <div style="font-size: 22px; line-height: 1;">🎫</div>
+                    <div style="margin-top: 12px; font-family: Inter, system-ui, sans-serif; font-size: 15px; font-weight: 800; letter-spacing: -0.02em; color: #ffffff;">Inscritos sob controle</div>
+                    <div style="margin-top: 6px; font-family: Inter, system-ui, sans-serif; font-size: 13px; line-height: 1.55; color: rgba(255,255,255,0.62);">Lista completa com busca, filtros e importação — exporte para CSV quando quiser.</div>
+                  </td>
+                  <td class="col-gap" width="16" style="font-size:0; line-height:0;">&nbsp;</td>
+                  <td class="card-spacer" style="display:none; height:0;"></td>
+                  <td class="col" width="292" valign="top" style="border-radius: 16px; background-color: #111111; border: 1px solid rgba(255,255,255,0.10); padding: 24px;">
+                    <div style="font-size: 22px; line-height: 1;">✅</div>
+                    <div style="margin-top: 12px; font-family: Inter, system-ui, sans-serif; font-size: 15px; font-weight: 800; letter-spacing: -0.02em; color: #ffffff;">Checklist do evento</div>
+                    <div style="margin-top: 6px; font-family: Inter, system-ui, sans-serif; font-size: 13px; line-height: 1.55; color: rgba(255,255,255,0.62);">Tudo o que precisa acontecer antes do grande dia, com progresso visível para o time.</div>
+                  </td>
+                </tr>
+                <tr><td colspan="4" style="height: 16px; line-height: 16px; font-size: 0;">&nbsp;</td></tr>
+                <tr>
+                  <td class="col" width="292" valign="top" style="border-radius: 16px; background-color: #111111; border: 1px solid rgba(255,255,255,0.10); padding: 24px;">
+                    <div style="font-size: 22px; line-height: 1;">💰</div>
+                    <div style="margin-top: 12px; font-family: Inter, system-ui, sans-serif; font-size: 15px; font-weight: 800; letter-spacing: -0.02em; color: #ffffff;">Financeiro sem surpresa</div>
+                    <div style="margin-top: 6px; font-family: Inter, system-ui, sans-serif; font-size: 13px; line-height: 1.55; color: rgba(255,255,255,0.62);">Receitas e despesas por evento, com orçamento acompanhado em tempo real.</div>
+                  </td>
+                  <td class="col-gap" width="16" style="font-size:0; line-height:0;">&nbsp;</td>
+                  <td class="card-spacer" style="display:none; height:0;"></td>
+                  <td class="col" width="292" valign="top" style="border-radius: 16px; background-color: #111111; border: 1px solid rgba(255,255,255,0.10); padding: 24px;">
+                    <div style="font-size: 22px; line-height: 1;">👥</div>
+                    <div style="margin-top: 12px; font-family: Inter, system-ui, sans-serif; font-size: 15px; font-weight: 800; letter-spacing: -0.02em; color: #ffffff;">Time no mesmo painel</div>
+                    <div style="margin-top: 6px; font-family: Inter, system-ui, sans-serif; font-size: 13px; line-height: 1.55; color: rgba(255,255,255,0.62);">Convide membros para o workspace e organize cada evento em conjunto.</div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <tr><td style="height: 16px; line-height: 16px; font-size: 0;">&nbsp;</td></tr>
+
+          <!-- Como funciona o beta -->
+          <tr>
+            <td class="px" style="border-radius: 16px; background-color: #111111; border: 1px solid rgba(255,255,255,0.10); padding: 28px 32px;">
+              <div style="font-family: Inter, system-ui, sans-serif; font-size: 16px; font-weight: 800; letter-spacing: -0.02em; color: #ffffff;">Como funciona o <span style="display:inline-block; background-color:#00e47c; color:#000000; padding: 1px 8px 3px; border-radius: 5px; transform: rotate(-1.5deg);">beta fechado</span></div>
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top: 16px;">
+                <tr>
+                  <td width="26" valign="top" style="font-family: Inter, system-ui, sans-serif; font-size: 13px; font-weight: 800; color: #00e47c;">1.</td>
+                  <td style="font-family: Inter, system-ui, sans-serif; font-size: 13.5px; line-height: 1.6; color: rgba(255,255,255,0.62); padding-bottom: 10px;">Clique no botão e confirme seu interesse — leva menos de um minuto.</td>
+                </tr>
+                <tr>
+                  <td width="26" valign="top" style="font-family: Inter, system-ui, sans-serif; font-size: 13px; font-weight: 800; color: #00e47c;">2.</td>
+                  <td style="font-family: Inter, system-ui, sans-serif; font-size: 13.5px; line-height: 1.6; color: rgba(255,255,255,0.62); padding-bottom: 10px;">Você recebe o acesso ao seu workspace com dados de exemplo para explorar.</td>
+                </tr>
+                <tr>
+                  <td width="26" valign="top" style="font-family: Inter, system-ui, sans-serif; font-size: 13px; font-weight: 800; color: #00e47c;">3.</td>
+                  <td style="font-family: Inter, system-ui, sans-serif; font-size: 13.5px; line-height: 1.6; color: rgba(255,255,255,0.62);">Use no seu próximo evento e nos conte o que faltou — seu feedback molda o produto.</td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <tr><td style="height: 28px; line-height: 28px; font-size: 0;">&nbsp;</td></tr>
+
+          <!-- CTA secundário -->
+          <tr>
+            <td align="center">
+              <table role="presentation" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td align="center" style="border-radius: 12px; background-color: #00e47c;">
+                    <a href="{{CTA_URL}}" target="_blank" style="display: inline-block; padding: 14px 34px; font-family: Inter, system-ui, sans-serif; font-size: 15px; font-weight: 700; color: #000000; border-radius: 12px;">
+                      Quero participar do beta
+                    </a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Rodapé -->
+          <tr>
+            <td align="center" style="padding: 36px 40px 0;">
+              <div style="font-family: Inter, system-ui, sans-serif; font-size: 12.5px; color: rgba(255,255,255,0.40);">
+                Nexo — gestão de eventos sem caos
+              </div>
+              <div style="margin-top: 8px; font-family: Inter, system-ui, sans-serif; font-size: 12px; line-height: 1.6; color: rgba(255,255,255,0.30);">
+                Você recebeu este email porque se interessou pelo Nexo.<br />
+                <a href="{{UNSUBSCRIBE_URL}}" style="color: rgba(255,255,255,0.40); text-decoration: underline;">Cancelar inscrição</a>
+              </div>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

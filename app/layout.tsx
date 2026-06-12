@@ -20,7 +20,21 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="pt-BR" className={`${inter.variable} h-full antialiased`}>
+    <html
+      lang="pt-BR"
+      data-theme="light"
+      suppressHydrationWarning
+      className={`${inter.variable} h-full antialiased`}
+    >
+      <head>
+        {/* Aplica o tema salvo antes do paint — evita flash claro→escuro
+            (padrão do guia preventing-flash-before-hydration do Next). */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var t=localStorage.getItem("nexo:theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}})()`,
+          }}
+        />
+      </head>
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );
