@@ -1,0 +1,655 @@
+.scene {
+  --mx: 50%;
+  --my: 45%;
+  --px: 0;
+  --py: 0;
+  box-sizing: border-box;
+  position: relative;
+  isolation: isolate;
+  height: 100dvh;
+  min-height: 100dvh;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(88px, 10vw, 128px) clamp(20px, 5vw, 80px) clamp(44px, 7vw, 84px);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 30%),
+    #050505;
+  color: #ffffff;
+}
+
+.scene::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    radial-gradient(1100px 720px at 50% 48%, transparent 42%, rgba(0, 0, 0, 0.72) 100%),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.62), transparent 28%, transparent 72%, rgba(0, 0, 0, 0.62));
+}
+
+.wordmark {
+  position: absolute;
+  z-index: 3;
+  top: clamp(22px, 4vw, 38px);
+  left: clamp(20px, 4vw, 42px);
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.logoMark {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 0 0 1px rgba(0, 228, 124, 0.12);
+  color: #ffffff;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.stage {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.grid {
+  position: absolute;
+  inset: -20%;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.06) 1px, transparent 1px);
+  background-position:
+    calc(var(--px) * -18px) calc(var(--py) * -18px),
+    calc(var(--px) * -18px) calc(var(--py) * -18px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse 64% 58% at var(--mx) var(--my), black 8%, transparent 72%);
+  opacity: 0.42;
+}
+
+.cursorLight {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(520px circle at var(--mx) var(--my), rgba(0, 228, 124, 0.2), rgba(0, 228, 124, 0.065) 38%, transparent 70%),
+    radial-gradient(1000px circle at var(--mx) var(--my), rgba(255, 255, 255, 0.07), transparent 64%);
+  opacity: 0.95;
+}
+
+.commandMap {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(86vw, 1060px);
+  height: min(72vh, 640px);
+  translate: -50% -50%;
+  transform: translate3d(calc(var(--px) * -18px), calc(var(--py) * -12px), 0);
+  transition: transform 420ms var(--ease);
+}
+
+.ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.095);
+  box-shadow: inset 0 0 34px rgba(0, 228, 124, 0.03);
+}
+
+.ringOuter {
+  inset: 2% 6%;
+  animation: ringBreathe 7.2s ease-in-out infinite alternate;
+}
+
+.ringMiddle {
+  inset: 18% 22%;
+  border-color: rgba(0, 228, 124, 0.16);
+  animation: ringBreathe 6s ease-in-out 0.3s infinite alternate;
+}
+
+.ringInner {
+  inset: 34% 38%;
+  border-color: rgba(255, 255, 255, 0.16);
+  background: radial-gradient(circle, rgba(0, 228, 124, 0.08), transparent 62%);
+  animation: ringBreathe 5s ease-in-out 0.5s infinite alternate;
+}
+
+.scan {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 46%;
+  height: 1px;
+  transform-origin: left center;
+  background: linear-gradient(90deg, rgba(0, 228, 124, 0.42), transparent);
+  opacity: 0.48;
+  animation: scanSweep 13s linear infinite;
+}
+
+.mapNode {
+  --node-x: 14px;
+  --node-y: 10px;
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.055);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.28);
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  translate: calc(var(--px) * var(--node-x)) calc(var(--py) * var(--node-y));
+}
+
+.mapNode i {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #00e47c;
+  box-shadow: 0 0 18px rgba(0, 228, 124, 0.78);
+}
+
+.mapNode b {
+  font: inherit;
+}
+
+.nodeNorth {
+  top: 8%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.nodeEast {
+  --node-x: -20px;
+  top: 47%;
+  right: 7%;
+  transform: translate(50%, -50%);
+}
+
+.nodeWest {
+  --node-x: 20px;
+  top: 47%;
+  left: 7%;
+  transform: translate(-50%, -50%);
+}
+
+.paths {
+  position: absolute;
+  inset: 0;
+  opacity: 0.64;
+}
+
+.path {
+  position: absolute;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(0, 228, 124, 0.42), transparent);
+  transform-origin: center;
+}
+
+.path::after {
+  content: "";
+  position: absolute;
+  top: -2px;
+  left: 0;
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: #00e47c;
+  box-shadow: 0 0 16px rgba(0, 228, 124, 0.75);
+  animation: packetMove 3.7s var(--ease) infinite;
+}
+
+.pathOne {
+  top: 24%;
+  left: 18%;
+  width: 28vw;
+  transform: rotate(10deg);
+}
+
+.pathTwo {
+  top: 31%;
+  right: 12%;
+  width: 24vw;
+  transform: rotate(-18deg);
+}
+
+.pathThree {
+  bottom: 25%;
+  left: 16%;
+  width: 30vw;
+  transform: rotate(-10deg);
+}
+
+.pathFour {
+  right: 15%;
+  bottom: 23%;
+  width: 28vw;
+  transform: rotate(13deg);
+}
+
+.signalCard {
+  --move-x: 22px;
+  --move-y: 16px;
+  position: absolute;
+  width: 188px;
+  min-height: 116px;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.062);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.32);
+  backdrop-filter: blur(14px);
+  color: #ffffff;
+  translate: calc(var(--px) * var(--move-x)) calc(var(--py) * var(--move-y));
+  animation: cardFloat 5.8s ease-in-out infinite alternate;
+}
+
+.signalCard span,
+.signalCard small {
+  display: block;
+  color: rgba(255, 255, 255, 0.52);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.signalCard strong {
+  display: block;
+  margin-top: 3px;
+  font-size: 30px;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.signalCard small {
+  margin-top: 5px;
+  color: rgba(255, 255, 255, 0.44);
+  text-transform: none;
+}
+
+.microChart {
+  display: flex;
+  align-items: flex-end;
+  gap: 5px;
+  height: 34px;
+}
+
+.microChart i {
+  flex: 1;
+  height: var(--bar-height);
+  min-height: 7px;
+  border-radius: 4px 4px 2px 2px;
+  background: linear-gradient(180deg, #00e47c, #00b863);
+  opacity: 0.88;
+  transform-origin: bottom;
+  animation: barRise 900ms var(--ease) var(--bar-delay) both;
+}
+
+.cardAttendees {
+  top: 17%;
+  left: clamp(22px, 7vw, 126px);
+}
+
+.cardBudget {
+  --move-x: -26px;
+  top: 16%;
+  right: clamp(22px, 7vw, 126px);
+  animation-delay: 0.4s;
+}
+
+.cardTasks {
+  --move-y: -18px;
+  bottom: 17%;
+  left: clamp(34px, 10vw, 184px);
+  animation-delay: 0.8s;
+}
+
+.cardTeam {
+  --move-x: -20px;
+  --move-y: -14px;
+  right: clamp(34px, 10vw, 184px);
+  bottom: 16%;
+  animation-delay: 1.1s;
+}
+
+.content {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  max-width: 900px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  translate: calc(var(--px) * -7px) calc(var(--py) * -5px);
+  transition: translate 420ms var(--ease);
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 24px;
+  border: 1px solid rgba(0, 228, 124, 0.38);
+  border-radius: 999px;
+  background: rgba(0, 228, 124, 0.12);
+  padding: 7px 13px;
+  color: #baffdf;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.eyebrow::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #00e47c;
+  box-shadow: 0 0 18px rgba(0, 228, 124, 0.88);
+  animation: statusPulse 1.5s ease-in-out infinite;
+}
+
+.title {
+  width: 11.5ch;
+  max-width: 100%;
+  margin: 0;
+  font-size: clamp(3rem, 8.4vw, 7.25rem);
+  font-weight: 900;
+  line-height: 0.92;
+  letter-spacing: 0;
+}
+
+.highlight {
+  display: inline-block;
+  margin-top: 0.08em;
+  border-radius: 999px;
+  background: #00e47c;
+  padding: 0.02em 0.17em 0.08em;
+  color: #000000;
+  line-height: 0.95;
+  transform: rotate(-1deg);
+  box-shadow: 0 22px 80px rgba(0, 228, 124, 0.24);
+}
+
+.subtitle {
+  width: 650px;
+  max-width: 100%;
+  margin: 28px 0 0;
+  color: rgba(255, 255, 255, 0.66);
+  font-size: clamp(1rem, 2vw, 1.2rem);
+  line-height: 1.65;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 34px;
+  flex-wrap: wrap;
+}
+
+.primaryAction {
+  display: inline-flex;
+  min-height: 50px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  padding: 0 20px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-decoration: none;
+  transition:
+    background 180ms var(--ease),
+    border-color 180ms var(--ease),
+    color 180ms var(--ease),
+    transform 180ms var(--ease);
+}
+
+.primaryAction {
+  background: #00e47c;
+  color: #000000;
+  box-shadow: 0 18px 52px rgba(0, 228, 124, 0.22);
+}
+
+.primaryAction:hover {
+  background: #12f38c;
+  transform: translateY(-2px);
+}
+
+.signalStrip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  width: min(100%, 650px);
+  margin: 42px 0 0;
+  padding: 1px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  list-style: none;
+  overflow: hidden;
+}
+
+.signalStrip li {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 10px;
+  background: rgba(8, 8, 8, 0.74);
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.signalStrip li::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #00e47c;
+  opacity: 0.78;
+}
+
+@keyframes ringBreathe {
+  from {
+    opacity: 0.56;
+    transform: scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1.018);
+  }
+}
+
+@keyframes scanSweep {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes packetMove {
+  from {
+    left: 0;
+    opacity: 0;
+  }
+  18%,
+  78% {
+    opacity: 1;
+  }
+  to {
+    left: 100%;
+    opacity: 0;
+  }
+}
+
+@keyframes cardFloat {
+  from {
+    transform: translateY(-5px);
+  }
+  to {
+    transform: translateY(7px);
+  }
+}
+
+@keyframes barRise {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes statusPulse {
+  0%,
+  100% {
+    opacity: 0.58;
+    transform: scale(0.9);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
+}
+
+@media (max-width: 1040px) {
+  .signalCard {
+    display: none;
+  }
+
+  .commandMap {
+    width: 112vw;
+    height: 70vh;
+    opacity: 0.86;
+  }
+}
+
+@media (max-width: 720px) {
+  .scene {
+    align-items: flex-start;
+    padding-top: 112px;
+  }
+
+  .wordmark {
+    top: 20px;
+    left: 20px;
+  }
+
+  .title {
+    width: 300px;
+    max-width: 100%;
+    font-size: clamp(2.15rem, 10.5vw, 3.05rem);
+    line-height: 0.97;
+  }
+
+  .highlight {
+    max-width: 100%;
+    padding-inline: 0.13em;
+    font-size: 0.9em;
+  }
+
+  .subtitle {
+    width: 330px;
+    max-width: 100%;
+    margin-top: 22px;
+  }
+
+  .primaryAction {
+    width: min(100%, 280px);
+  }
+
+  .signalStrip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    max-width: 360px;
+    margin-top: 34px;
+  }
+
+  .signalStrip li {
+    font-size: 11px;
+  }
+
+  .mapNode b {
+    display: none;
+  }
+
+  .mapNode {
+    padding: 8px;
+  }
+}
+
+@media (max-width: 420px) {
+  .scene {
+    padding-inline: 18px;
+  }
+
+  .eyebrow {
+    max-width: 100%;
+    font-size: 10.5px;
+    text-align: left;
+  }
+
+  .signalStrip li {
+    padding-inline: 6px;
+    font-size: 10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .content,
+  .mapNode,
+  .signalCard {
+    translate: 0 0;
+    transform: none;
+    transition: none;
+  }
+
+  .commandMap {
+    transform: none;
+    transition: none;
+  }
+
+  .ringOuter,
+  .ringMiddle,
+  .ringInner,
+  .scan,
+  .path::after,
+  .signalCard,
+  .microChart i,
+  .eyebrow::before {
+    animation: none;
+  }
+}

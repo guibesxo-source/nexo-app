@@ -14,6 +14,8 @@ import {
   logTaskToFinance,
   memberById,
   PAYMENT_META,
+  PHASE_META,
+  phaseOf,
   removeTask,
   removeTaskAttachment,
   selectEvent,
@@ -26,6 +28,7 @@ import {
 } from "@/lib/db";
 import { compressImage, downloadDataUrl, fileToDataUrl } from "@/lib/files";
 import { daysUntil, fmtMoney } from "@/lib/format";
+import type { TaskPhase } from "@/types";
 
 /** Posição do prazo na linha do tempo do evento (D-14, Dia D, D+2…). */
 function eventDelta(eventStart?: string, due?: string | null): { dx: string; sub: string } | null {
@@ -238,6 +241,18 @@ export function TaskDetail({ taskId, onClose }: { taskId: string; onClose: () =>
                 <option value="">Sem responsável</option>
                 {db.members.map((m) => (
                   <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="ts-prop">
+              <span className="k">Fase</span>
+              <select
+                className="input"
+                value={phaseOf(task, ev)}
+                onChange={(e) => updateTask(task.id, { phase: e.target.value as TaskPhase })}
+              >
+                {PHASE_META.map((p) => (
+                  <option key={p.id} value={p.id}>{p.label}</option>
                 ))}
               </select>
             </div>

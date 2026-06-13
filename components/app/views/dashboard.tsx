@@ -5,6 +5,7 @@ import { useState } from "react";
 import { BarChart, Card, Donut, Empty, Icon, Kpi, PageHead, useToast } from "@/components/app/kit";
 import { ImportAttendeesModal } from "@/components/app/import-attendees";
 import { SymplaImportModal } from "@/components/app/sympla-import";
+import { HubspotImportModal } from "@/components/app/hubspot-import";
 import { useGo, useUi } from "@/components/app/shell";
 import {
   eventById,
@@ -22,7 +23,9 @@ export function Dashboard({ eventId }: { eventId?: string }) {
   const toast = useToast();
   const { openNewEvent } = useUi();
   const [importing, setImporting] = useState(false);
+  const [linkOpen, setLinkOpen] = useState(false);
   const [symplaOpen, setSymplaOpen] = useState(false);
+  const [hubspotOpen, setHubspotOpen] = useState(false);
 
   const ev = eventId ? eventById(db, eventId) : selectedEvent(db);
 
@@ -91,9 +94,36 @@ export function Dashboard({ eventId }: { eventId?: string }) {
             <button className="btn" onClick={() => setImporting(true)}>
               <Icon name="upload" size={15} />Importar lista
             </button>
-            <button className="btn" onClick={() => setSymplaOpen(true)}>
-              <Icon name="link" size={15} />Sympla
-            </button>
+            <span className="menu-wrap">
+              <button
+                className="btn"
+                onClick={() => setLinkOpen((o) => !o)}
+                aria-haspopup="menu"
+                aria-expanded={linkOpen}
+              >
+                <Icon name="link" size={15} />Linkar dados
+                <Icon name={linkOpen ? "chevUp" : "chevDown"} size={14} />
+              </button>
+              {linkOpen && (
+                <>
+                  <span className="menu-scrim" onClick={() => setLinkOpen(false)} />
+                  <span className="menu left" role="menu">
+                    <button
+                      className="menu-item"
+                      onClick={() => { setLinkOpen(false); setSymplaOpen(true); }}
+                    >
+                      Sympla
+                    </button>
+                    <button
+                      className="menu-item"
+                      onClick={() => { setLinkOpen(false); setHubspotOpen(true); }}
+                    >
+                      HubSpot
+                    </button>
+                  </span>
+                </>
+              )}
+            </span>
             <button className="btn" onClick={exportSummary}>
               <Icon name="download" size={15} />Exportar
             </button>
@@ -107,6 +137,9 @@ export function Dashboard({ eventId }: { eventId?: string }) {
       {importing && <ImportAttendeesModal eventId={ev.id} onClose={() => setImporting(false)} />}
       {symplaOpen && (
         <SymplaImportModal eventId={ev.id} eventName={ev.name} onClose={() => setSymplaOpen(false)} />
+      )}
+      {hubspotOpen && (
+        <HubspotImportModal eventId={ev.id} eventName={ev.name} onClose={() => setHubspotOpen(false)} />
       )}
 
       <div className="kpi-grid">

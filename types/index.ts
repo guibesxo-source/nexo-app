@@ -14,6 +14,9 @@ export type AttendeeStatus = "pendente" | "confirmado" | "checkin" | "cancelado"
 
 export type TaskStatus = "aberta" | "concluida";
 
+/** Fase do checklist em relação ao evento: antes, no dia, depois. */
+export type TaskPhase = "pre" | "durante" | "pos";
+
 export type TxKind = "entrada" | "saida";
 
 export type TxPayment = "pago" | "pendente" | "recebido";
@@ -81,6 +84,8 @@ export type Task = {
   event_id: string;
   title: string;
   group: string; // agrupamento do checklist (ex.: "Pré-produção")
+  /** Fase do evento; ausente em tarefas antigas — derivada do prazo via phaseOf. */
+  phase?: TaskPhase;
   status: TaskStatus;
   assignee_id: string | null;
   due_date: string | null; // ISO (só data)
@@ -122,6 +127,8 @@ export type Transaction = {
 export type ChecklistTemplateItem = {
   group: string;
   title: string;
+  /** Fase do evento; se ausente, é derivada de offset_days ao aplicar o template. */
+  phase?: TaskPhase;
   /** Dias relativos à data do evento: negativo = antes (D-14), positivo = depois (D+2). */
   offset_days?: number;
 };
@@ -147,6 +154,8 @@ export type AppSettings = {
   toggles: Record<string, boolean>;
   /** Token da API pública do Sympla (integração de importação de inscritos). */
   sympla_token?: string | null;
+  /** Private App token do HubSpot (portal pessoal do Nexo) para importar inscritos. */
+  hubspot_token?: string | null;
   /** Últimas buscas do overlay de busca global (mais recente primeiro). */
   recent_searches?: string[];
 };

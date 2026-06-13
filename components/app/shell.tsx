@@ -19,6 +19,7 @@ import {
   clearRecentSearches,
   currentUser,
   hydrate,
+  login,
   logout,
   pushRecentSearch,
   selectEvent,
@@ -27,6 +28,9 @@ import {
   useDb,
   useHydrated,
 } from "@/lib/db";
+import { getState } from "@/lib/db/store";
+import { createClient } from "@/lib/supabase/client";
+import { displayNameFromUser } from "@/lib/auth";
 import { fmtDateShort, initialsOf, relTime } from "@/lib/format";
 
 /** Iniciais de evento: duas primeiras palavras (ex.: "Summit de…" → SD ≠ pessoas). */
@@ -204,7 +208,11 @@ function Sidebar({ active, onNav, open }: {
           <button
             className="row-action"
             title="Sair"
-            onClick={() => { logout(); router.replace("/login"); }}
+            onClick={async () => {
+              await createClient().auth.signOut();
+              logout();
+              router.replace("/login");
+            }}
           >
             <Icon name="logout" size={16} />
           </button>
@@ -502,10 +510,34 @@ export function AppShell({ children }: { children: ReactNode }) {
     hydrate();
   }, []);
 
-  // Guard de sessão: área logada exige usuário.
+  // Ponte com o Supabase Auth: a identidade real vem do Supabase. Havendo
+  // usuário e sem sessão local ainda, espelha (login local). Sem usuário,
+  // volta pro /login. Reage também a logout disparado em outra aba.
   useEffect(() => {
-    if (ready && !user) router.replace("/login");
-  }, [ready, user, router]);
+    if (!ready) return;
+    const supabase = createClient();
+    let active = true;
+    supabase.auth.getUser().then(({ data: { user: u } }) => {
+      if (!active) return;
+      if (!u) {
+        router.replace("/login");
+        return;
+      }
+      if (!getState().session.user_id) {
+        login(displayNameFromUser(u), u.email ?? "");
+      }
+    });
+    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "SIGNED_OUT") {
+        logout();
+        router.replace("/login");
+      }
+    });
+    return () => {
+      active = false;
+      sub.subscription.unsubscribe();
+    };
+  }, [ready, router]);
 
   useEffect(() => {
     document.querySelector(".content")?.scrollTo({ top: 0 });

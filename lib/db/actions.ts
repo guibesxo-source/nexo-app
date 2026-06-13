@@ -13,6 +13,7 @@ import type {
   MemberRole,
   Task,
   TaskAttachment,
+  TaskPhase,
   TicketType,
   Transaction,
   TxKind,
@@ -200,7 +201,7 @@ export function removeAttendee(id: string) {
 
 /* ---------- Checklist ---------- */
 
-export type TaskDraft = Pick<Task, "title" | "group" | "assignee_id" | "due_date">;
+export type TaskDraft = Pick<Task, "title" | "group" | "phase" | "assignee_id" | "due_date">;
 
 export function addTask(eventId: string, draft: TaskDraft): string {
   const id = newId();
@@ -236,7 +237,7 @@ export function removeTask(id: string) {
 /* ---------- Detalhe da tarefa (descrição, anexos, custo) ---------- */
 
 export type TaskPatch = Partial<
-  Pick<Task, "title" | "group" | "assignee_id" | "due_date" | "description" | "cost_estimate">
+  Pick<Task, "title" | "group" | "phase" | "assignee_id" | "due_date" | "description" | "cost_estimate">
 >;
 
 export function updateTask(id: string, patch: TaskPatch) {
@@ -391,6 +392,12 @@ function dueFromOffset(startsAt: string | undefined, offset: number | undefined)
   return `${y}-${m}-${day}`;
 }
 
+/** Fase derivada do prazo relativo: antes = pré, no dia = durante, depois = pós. */
+function phaseFromOffset(offset: number | undefined): TaskPhase {
+  if (offset === undefined || offset < 0) return "pre";
+  return offset === 0 ? "durante" : "pos";
+}
+
 /** Offset em dias entre um prazo (data-only) e a data do evento; vazio se faltar algo. */
 function offsetFromDue(startsAt: string | undefined, due: string | null): { offset_days?: number } {
   if (!startsAt || !due) return {};
@@ -411,6 +418,7 @@ export function applyTemplate(eventId: string, template: ChecklistTemplate): num
       event_id: eventId,
       title: it.title,
       group: it.group,
+      phase: it.phase ?? phaseFromOffset(it.offset_days),
       status: "aberta",
       assignee_id: null,
       due_date: dueFromOffset(ev?.starts_at, it.offset_days),
@@ -433,7 +441,15 @@ export function saveChecklistAsTemplate(eventId: string, name: string): string {
     const ev = s.events.find((e) => e.id === eventId);
     const items: ChecklistTemplateItem[] = s.tasks
       .filter((t) => t.event_id === eventId)
-      .map((t) => ({ group: t.group, title: t.title, ...offsetFromDue(ev?.starts_at, t.due_date) }));
+      .map((t) => {
+        const off = offsetFromDue(ev?.starts_at, t.due_date);
+        return {
+          group: t.group,
+          title: t.title,
+          phase: t.phase ?? phaseFromOffset(off.offset_days),
+          ...off,
+        };
+      });
     const tpl: ChecklistTemplate = { id, name: clean, format: ev?.format, builtin: false, items };
     return { ...s, templates: [tpl, ...s.templates] };
   });
@@ -471,6 +487,15 @@ export function addTransaction(eventId: string, draft: TransactionDraft): string
     ` · ${draft.description}`,
   ]);
   return id;
+}
+
+/** Edita os campos de um lançamento existente (mesmo draft do form de criação). */
+export function updateTransaction(id: string, patch: Partial<TransactionDraft>) {
+  mutate((s) => ({
+    ...s,
+    transactions: s.transactions.map((t) => (t.id === id ? { ...t, ...patch } : t)),
+  }));
+  logActivity("✏️", ["Lançamento editado", patch.description ? ` · ${patch.description}` : ""]);
 }
 
 /** Anexa/troca/remove o arquivo (NF ou boleto) de um lançamento existente. */
@@ -537,6 +562,10 @@ export function updateProfile(userId: string, patch: Partial<Pick<Member, "name"
 
 export function setSymplaToken(token: string | null) {
   mutate((s) => ({ ...s, settings: { ...s.settings, sympla_token: token } }));
+}
+
+export function setHubspotToken(token: string | null) {
+  mutate((s) => ({ ...s, settings: { ...s.settings, hubspot_token: token } }));
 }
 
 /* ---------- Buscas recentes (overlay de busca global) ---------- */

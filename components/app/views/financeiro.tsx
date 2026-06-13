@@ -17,6 +17,7 @@ import {
   setBudget,
   setTransactionFile,
   txOf,
+  updateTransaction,
   useDb,
 } from "@/lib/db";
 import { transactionSchema } from "@/lib/validations/transaction";
@@ -81,20 +82,23 @@ function AttachDocField({ label, short, value, onChange }: {
   );
 }
 
-function TxFormModal({ eventId, onClose }: { eventId: string; onClose: () => void }) {
+function TxFormModal({ eventId, tx, onClose }: {
+  eventId: string; tx?: Transaction; onClose: () => void;
+}) {
   const db = useDb();
   const toast = useToast();
+  const editing = !!tx;
   const [form, setForm] = useState({
-    description: "",
-    amount_cents: 0,
-    kind: "saida" as TxKind,
-    category_id: db.categories[0]?.id ?? "",
-    payment_status: "pendente" as TxPayment,
-    invoice_ref: "",
-    occurred_on: new Date().toISOString().slice(0, 10),
+    description: tx?.description ?? "",
+    amount_cents: tx ? Math.round(tx.amount * 100) : 0,
+    kind: tx?.kind ?? ("saida" as TxKind),
+    category_id: tx?.category_id ?? db.categories[0]?.id ?? "",
+    payment_status: tx?.payment_status ?? ("pendente" as TxPayment),
+    invoice_ref: tx?.invoice_ref ?? "",
+    occurred_on: tx?.occurred_on ?? new Date().toISOString().slice(0, 10),
   });
-  const [invoiceFile, setInvoiceFile] = useState<DocFile | null>(null);
-  const [boletoFile, setBoletoFile] = useState<DocFile | null>(null);
+  const [invoiceFile, setInvoiceFile] = useState<DocFile | null>(tx?.invoice_file ?? null);
+  const [boletoFile, setBoletoFile] = useState<DocFile | null>(tx?.boleto_file ?? null);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const set = (key: keyof typeof form) =>
@@ -122,19 +126,24 @@ function TxFormModal({ eventId, onClose }: { eventId: string; onClose: () => voi
       setErrors(errs);
       return;
     }
-    addTransaction(eventId, parsed.data);
-    toast("Lançamento adicionado");
+    if (editing) {
+      updateTransaction(tx.id, parsed.data);
+      toast("Lançamento atualizado");
+    } else {
+      addTransaction(eventId, parsed.data);
+      toast("Lançamento adicionado");
+    }
     onClose();
   };
 
   return (
     <Modal
-      title="Novo lançamento"
+      title={editing ? "Editar lançamento" : "Novo lançamento"}
       onClose={onClose}
       footer={
         <>
           <button className="btn" onClick={onClose}>Cancelar</button>
-          <button className="btn btn-primary" onClick={submit}>Lançar</button>
+          <button className="btn btn-primary" onClick={submit}>{editing ? "Salvar" : "Lançar"}</button>
         </>
       }
     >
@@ -401,6 +410,7 @@ export function Financeiro() {
   const pendingAttach = useRef<{ id: string; field: "invoice_file" | "boleto_file" } | null>(null);
   const [seg, setSeg] = useState("todos");
   const [adding, setAdding] = useState(false);
+  const [editingTx, setEditingTx] = useState<Transaction | null>(null);
   const [editingBudget, setEditingBudget] = useState(false);
 
   const ev = selectedEvent(db);
@@ -642,6 +652,10 @@ export function Financeiro() {
                   <Menu
                     items={[
                       {
+                        label: "Editar lançamento",
+                        onClick: () => setEditingTx(t),
+                      },
+                      {
                         label: t.invoice_file ? "Trocar NF (arquivo)" : "Upar NF",
                         onClick: () => pickAttach(t.id, "invoice_file"),
                       },
@@ -667,6 +681,9 @@ export function Financeiro() {
       </Card>
 
       {adding && <TxFormModal eventId={ev.id} onClose={() => setAdding(false)} />}
+      {editingTx && (
+        <TxFormModal eventId={ev.id} tx={editingTx} onClose={() => setEditingTx(null)} />
+      )}
       {editingBudget && (
         <BudgetModal eventId={ev.id} current={ev.budget_planned} onClose={() => setEditingBudget(false)} />
       )}

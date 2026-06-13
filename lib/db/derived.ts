@@ -10,6 +10,7 @@ import type {
   EventPriority,
   EventStatus,
   Task,
+  TaskPhase,
   Transaction,
 } from "@/types";
 import type { DbState } from "./seed";
@@ -88,6 +89,35 @@ export function isTaskLate(t: Task): boolean {
   if (t.status === "concluida" || !t.due_date) return false;
   const due = new Date(t.due_date + "T23:59:59");
   return due.getTime() < Date.now();
+}
+
+/* ---------- Fases do checklist (pré / durante / pós) ---------- */
+
+/** Fases na ordem em que aparecem no checklist. */
+export const PHASE_META: { id: TaskPhase; label: string; short: string }[] = [
+  { id: "pre", label: "Pré-evento", short: "Pré" },
+  { id: "durante", label: "Durante o evento", short: "Durante" },
+  { id: "pos", label: "Pós-evento", short: "Pós" },
+];
+
+const PHASE_BY_ID = new Map(PHASE_META.map((p) => [p.id, p]));
+
+export const phaseLabel = (id: TaskPhase): string => PHASE_BY_ID.get(id)?.label ?? id;
+
+/**
+ * Fase efetiva da tarefa: usa a explícita quando existe; senão deriva do prazo
+ * em relação à data do evento (antes = pré, no dia = durante, depois = pós).
+ * Tarefas sem prazo ou sem evento caem em "pré".
+ */
+export function phaseOf(t: Task, event?: Event): TaskPhase {
+  if (t.phase) return t.phase;
+  if (!event?.starts_at || !t.due_date) return "pre";
+  const start = new Date(event.starts_at);
+  const due = new Date(t.due_date + "T00:00:00");
+  if (Number.isNaN(start.getTime()) || Number.isNaN(due.getTime())) return "pre";
+  const startDay = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+  const delta = Math.round((due.getTime() - startDay.getTime()) / 86400000);
+  return delta < 0 ? "pre" : delta === 0 ? "durante" : "pos";
 }
 
 /* ---------- KPIs por evento (docs/05 §5) ---------- */

@@ -12,6 +12,8 @@ import {
   applyTemplate,
   isTaskLate,
   memberById,
+  PHASE_META,
+  phaseOf,
   removeTask,
   removeTemplate,
   saveChecklistAsTemplate,
@@ -24,7 +26,7 @@ import { TaskDetail } from "@/components/app/task-detail";
 import { taskSchema } from "@/lib/validations/task";
 import { templateNameSchema } from "@/lib/validations/template";
 import { fmtDateShort, fmtMoney } from "@/lib/format";
-import type { ChecklistTemplate, Event, Task } from "@/types";
+import type { ChecklistTemplate, Event, Task, TaskPhase } from "@/types";
 
 const FORMAT_LABEL: Record<string, string> = {
   online: "Online",
@@ -34,20 +36,22 @@ const FORMAT_LABEL: Record<string, string> = {
 
 const DEFAULT_GROUPS = ["Pré-produção", "Marketing & Inscrições", "Produção & Dia do evento"];
 
-function TaskFormModal({ eventId, groups, onClose }: {
-  eventId: string; groups: string[]; onClose: () => void;
+function TaskFormModal({ eventId, groups, defaultPhase = "pre", onClose }: {
+  eventId: string; groups: string[]; defaultPhase?: TaskPhase; onClose: () => void;
 }) {
   const db = useDb();
   const toast = useToast();
   const [form, setForm] = useState({
     title: "",
     group: groups[0] ?? DEFAULT_GROUPS[0],
+    phase: defaultPhase,
     assignee_id: "",
     due_date: "",
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  const set = (key: keyof typeof form) =>
+  // campos de texto; a fase tem onChange próprio (valor tipado TaskPhase)
+  const set = (key: Exclude<keyof typeof form, "phase">) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
       setForm((f) => ({ ...f, [key]: e.target.value }));
 
@@ -93,12 +97,25 @@ function TaskFormModal({ eventId, groups, onClose }: {
           autoFocus
         />
       </Field>
-      <Field label="Grupo" error={errors.group}>
-        <input className="input" list="task-groups" value={form.group} onChange={set("group")} />
-        <datalist id="task-groups">
-          {groupOptions.map((g) => <option key={g} value={g} />)}
-        </datalist>
-      </Field>
+      <div className="form-grid">
+        <Field label="Fase" error={errors.phase}>
+          <select
+            className="input"
+            value={form.phase}
+            onChange={(e) => setForm((f) => ({ ...f, phase: e.target.value as TaskPhase }))}
+          >
+            {PHASE_META.map((p) => (
+              <option key={p.id} value={p.id}>{p.label}</option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Grupo" error={errors.group}>
+          <input className="input" list="task-groups" value={form.group} onChange={set("group")} />
+          <datalist id="task-groups">
+            {groupOptions.map((g) => <option key={g} value={g} />)}
+          </datalist>
+        </Field>
+      </div>
       <div className="form-grid">
         <Field label="Responsável" error={errors.assignee_id}>
           <select className="input" value={form.assignee_id} onChange={set("assignee_id")}>
@@ -282,9 +299,16 @@ export function Checklist() {
     (seg === "atrasadas" && isTaskLate(t)) ||
     (seg === "concluidas" && t.status === "concluida");
 
-  // Agrupa preservando a ordem de aparição dos grupos.
-  const groups: { name: string; tasks: Task[] }[] = [];
+  // Agrupa por fase (pré/durante/pós) e, dentro de cada fase, por grupo
+  // (preservando a ordem de aparição dos grupos).
+  const byPhase = new Map<TaskPhase, { name: string; tasks: Task[] }[]>();
   for (const t of all) {
+    const ph = phaseOf(t, ev);
+    let groups = byPhase.get(ph);
+    if (!groups) {
+      groups = [];
+      byPhase.set(ph, groups);
+    }
     let g = groups.find((x) => x.name === t.group);
     if (!g) {
       g = { name: t.group, tasks: [] };
@@ -292,6 +316,7 @@ export function Checklist() {
     }
     g.tasks.push(t);
   }
+  const groupNames = [...new Set(all.map((t) => t.group))];
 
   const toggle = (t: Task) => {
     toggleTask(t.id);
@@ -381,84 +406,98 @@ export function Checklist() {
           }
         />
       ) : (
-        groups.map((grp) => {
-          const visible = grp.tasks.filter(matches);
-          if (visible.length === 0) return null;
-          const done = grp.tasks.filter((t) => t.status === "concluida").length;
+        PHASE_META.map((ph) => {
+          const phaseGroups = byPhase.get(ph.id) ?? [];
+          const phaseTasks = phaseGroups.flatMap((g) => g.tasks);
+          if (phaseTasks.filter(matches).length === 0) return null;
+          const phaseDone = phaseTasks.filter((t) => t.status === "concluida").length;
           return (
-            <div key={grp.name} className="checklist">
-              <div className="task-group-head">
-                <span className="tg-title">{grp.name}</span>
-                <span className="tg-count">{done}/{grp.tasks.length}</span>
-                <span className="tg-line" />
+            <div key={ph.id} className="phase-block">
+              <div className="phase-head">
+                <span className="ph-title">{ph.label}</span>
+                <span className="ph-count">{phaseDone}/{phaseTasks.length}</span>
               </div>
-              {visible.map((t) => {
-                const isDone = t.status === "concluida";
-                const assignee = memberById(db, t.assignee_id);
+              {phaseGroups.map((grp) => {
+                const visible = grp.tasks.filter(matches);
+                if (visible.length === 0) return null;
+                const done = grp.tasks.filter((t) => t.status === "concluida").length;
                 return (
-                  <div className={"task" + (isDone ? " done" : "")} key={t.id}>
-                    <span className="checkbox" onClick={() => toggle(t)}>
-                      <Icon name="check" size={14} />
-                    </span>
-                    <div
-                      className="task-main"
-                      role="button"
-                      style={{ cursor: "pointer" }}
-                      onClick={() => setOpenTask(t.id)}
-                    >
-                      <div className="task-name">{t.title}</div>
-                      <div className="task-meta">
-                        {isDone ? (
-                          <Badge tone="green" dot>Concluída</Badge>
-                        ) : isTaskLate(t) ? (
-                          <Badge tone="red" dot>Atrasada</Badge>
-                        ) : (
-                          <Badge tone="gray" dot>Pendente</Badge>
-                        )}
-                        <span className="row" style={{ gap: 5 }}>
-                          <Icon name="clock" size={12} />
-                          {t.due_date ? fmtDateShort(t.due_date) : "sem prazo"}
-                        </span>
-                        {(t.attachments?.length ?? 0) > 0 && (
-                          <span className="row" style={{ gap: 4 }}>
-                            <Icon name="paperclip" size={12} />{t.attachments!.length}
-                          </span>
-                        )}
-                        {t.description && (
-                          <span className="row" style={{ gap: 4 }}>
-                            <Icon name="edit" size={12} />nota
-                          </span>
-                        )}
-                        {t.finance_tx_id ? (
-                          <span className="row" style={{ gap: 4, color: "var(--green-deep)" }}>
-                            <Icon name="wallet" size={12} />lançado
-                          </span>
-                        ) : t.cost_estimate ? (
-                          <span className="row" style={{ gap: 4 }}>
-                            <Icon name="wallet" size={12} />{fmtMoney(t.cost_estimate)}
-                          </span>
-                        ) : null}
-                      </div>
+                  <div key={grp.name} className="checklist">
+                    <div className="task-group-head">
+                      <span className="tg-title">{grp.name}</span>
+                      <span className="tg-count">{done}/{grp.tasks.length}</span>
+                      <span className="tg-line" />
                     </div>
-                    <span className="task-assignee row" style={{ gap: 6 }}>
-                      {assignee && <Avatar initials={assignee.initials} size="sm" />}
-                      <Menu
-                        items={[
-                          {
-                            label: isDone ? "Reabrir tarefa" : "Concluir tarefa",
-                            onClick: () => toggle(t),
-                          },
-                          {
-                            label: "Excluir",
-                            danger: true,
-                            onClick: () => {
-                              removeTask(t.id);
-                              toast("Tarefa excluída");
-                            },
-                          },
-                        ]}
-                      />
-                    </span>
+                    {visible.map((t) => {
+                      const isDone = t.status === "concluida";
+                      const assignee = memberById(db, t.assignee_id);
+                      return (
+                        <div className={"task" + (isDone ? " done" : "")} key={t.id}>
+                          <span className="checkbox" onClick={() => toggle(t)}>
+                            <Icon name="check" size={14} />
+                          </span>
+                          <div
+                            className="task-main"
+                            role="button"
+                            style={{ cursor: "pointer" }}
+                            onClick={() => setOpenTask(t.id)}
+                          >
+                            <div className="task-name">{t.title}</div>
+                            <div className="task-meta">
+                              {isDone ? (
+                                <Badge tone="green" dot>Concluída</Badge>
+                              ) : isTaskLate(t) ? (
+                                <Badge tone="red" dot>Atrasada</Badge>
+                              ) : (
+                                <Badge tone="gray" dot>Pendente</Badge>
+                              )}
+                              <span className="row" style={{ gap: 5 }}>
+                                <Icon name="clock" size={12} />
+                                {t.due_date ? fmtDateShort(t.due_date) : "sem prazo"}
+                              </span>
+                              {(t.attachments?.length ?? 0) > 0 && (
+                                <span className="row" style={{ gap: 4 }}>
+                                  <Icon name="paperclip" size={12} />{t.attachments!.length}
+                                </span>
+                              )}
+                              {t.description && (
+                                <span className="row" style={{ gap: 4 }}>
+                                  <Icon name="edit" size={12} />nota
+                                </span>
+                              )}
+                              {t.finance_tx_id ? (
+                                <span className="row" style={{ gap: 4, color: "var(--green-deep)" }}>
+                                  <Icon name="wallet" size={12} />lançado
+                                </span>
+                              ) : t.cost_estimate ? (
+                                <span className="row" style={{ gap: 4 }}>
+                                  <Icon name="wallet" size={12} />{fmtMoney(t.cost_estimate)}
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+                          <span className="task-assignee row" style={{ gap: 6 }}>
+                            {assignee && <Avatar initials={assignee.initials} size="sm" />}
+                            <Menu
+                              items={[
+                                {
+                                  label: isDone ? "Reabrir tarefa" : "Concluir tarefa",
+                                  onClick: () => toggle(t),
+                                },
+                                {
+                                  label: "Excluir",
+                                  danger: true,
+                                  onClick: () => {
+                                    removeTask(t.id);
+                                    toast("Tarefa excluída");
+                                  },
+                                },
+                              ]}
+                            />
+                          </span>
+                        </div>
+                      );
+                    })}
                   </div>
                 );
               })}
@@ -470,7 +509,7 @@ export function Checklist() {
       {adding && (
         <TaskFormModal
           eventId={ev.id}
-          groups={groups.map((g) => g.name)}
+          groups={groupNames}
           onClose={() => setAdding(false)}
         />
       )}

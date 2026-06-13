@@ -14,6 +14,7 @@ import type {
   Member,
   Session,
   Task,
+  TaskPhase,
   TicketType,
   Transaction,
   Workspace,
@@ -123,19 +124,34 @@ const E1_TASKS: SeedTask[] = [
   ["Enviar save-the-date", "Marketing & Inscrições", "m5", "2026-06-04", false],
   ["Confirmar lista de palestrantes", "Marketing & Inscrições", "m2", "2026-06-09", false],
   ["Preparar kit de imprensa", "Marketing & Inscrições", "m5", "2026-06-13", false],
-  ["Montar cronograma operacional", "Produção & Dia do evento", "m3", "2026-06-14", false],
-  ["Imprimir crachás e sinalização", "Produção & Dia do evento", "m6", "2026-06-15", false],
-  ["Briefing com a equipe de staff", "Produção & Dia do evento", "m1", "2026-06-16", false],
-  ["Testar equipamentos de A/V", "Produção & Dia do evento", "m6", "2026-06-08", false],
+  ["Testar equipamentos de A/V", "Produção", "m6", "2026-06-08", false],
+  ["Imprimir crachás e sinalização", "Produção", "m6", "2026-06-15", false],
+  ["Montar cronograma operacional", "Produção", "m3", "2026-06-14", false],
+  ["Briefing com a equipe de staff", "Dia do evento", "m1", "2026-06-18", false],
+  ["Abrir credenciamento e recepção", "Dia do evento", "m6", "2026-06-18", false],
+  ["Coordenar palco e cronograma ao vivo", "Dia do evento", "m3", "2026-06-18", false],
+  ["Compilar relatório de resultados", "Pós-evento", "m1", "2026-06-20", false],
+  ["Enviar pesquisa de satisfação (NPS)", "Pós-evento", "m5", "2026-06-19", false],
+  ["Follow-up dos leads com vendas", "Pós-evento", "m4", "2026-06-22", false],
 ];
+
+// Fase de cada grupo do checklist do e1 (pré/durante/pós).
+const E1_GROUP_PHASE: Record<string, TaskPhase> = {
+  "Pré-produção": "pre",
+  "Marketing & Inscrições": "pre",
+  "Produção": "pre",
+  "Dia do evento": "durante",
+  "Pós-evento": "pos",
+};
 
 const tasks: Task[] = [
   ...E1_TASKS.map(([title, group, assignee_id, due_date, done], i): Task => ({
-    id: `t${i + 1}`, event_id: "e1", title, group, assignee_id, due_date,
+    id: `t${i + 1}`, event_id: "e1", title, group, phase: E1_GROUP_PHASE[group] ?? "pre",
+    assignee_id, due_date,
     status: done ? "concluida" : "aberta", created_at: "2026-05-02T09:00:00",
   })),
-  { id: "t14", event_id: "e2", title: "Definir line-up principal", group: "Pré-produção", status: "aberta", assignee_id: "m2", due_date: "2026-06-20", created_at: "2026-05-12T09:00:00" },
-  { id: "t15", event_id: "e3", title: "Preparar material do workshop", group: "Pré-produção", status: "aberta", assignee_id: "m5", due_date: "2026-06-25", created_at: "2026-05-15T09:00:00" },
+  { id: "t19", event_id: "e2", title: "Definir line-up principal", group: "Pré-produção", phase: "pre", status: "aberta", assignee_id: "m2", due_date: "2026-06-20", created_at: "2026-05-12T09:00:00" },
+  { id: "t20", event_id: "e3", title: "Preparar material do workshop", group: "Pré-produção", phase: "pre", status: "aberta", assignee_id: "m5", due_date: "2026-06-25", created_at: "2026-05-15T09:00:00" },
 ];
 
 const categories: BudgetCategory[] = [
