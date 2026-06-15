@@ -24,6 +24,7 @@ import {
   pushRecentSearch,
   selectEvent,
   selectedEvent,
+  setSidebarCollapsed,
   sidebarCounts,
   useDb,
   useHydrated,
@@ -51,12 +52,14 @@ export const ROUTES: Record<string, string> = {
   financeiro: "/financeiro",
   checklist: "/checklist",
   membros: "/membros",
+  integracoes: "/integracoes",
   config: "/config",
 };
 
 const CRUMBS: Record<string, string> = {
   dashboard: "Dashboard", eventos: "Eventos", inscritos: "Inscritos",
-  financeiro: "Financeiro", checklist: "Checklist", membros: "Membros", config: "Configurações",
+  financeiro: "Financeiro", checklist: "Checklist", membros: "Membros",
+  integracoes: "APIs & Integrações", config: "Configurações",
 };
 
 function routeIdFromPath(pathname: string): string {
@@ -135,8 +138,9 @@ function EventSwitcher() {
   );
 }
 
-function Sidebar({ active, onNav, open }: {
-  active: string; onNav: (id: string) => void; open: boolean;
+function Sidebar({ active, onNav, open, collapsed, onToggleCollapse }: {
+  active: string; onNav: (id: string) => void; open: boolean; collapsed: boolean;
+  onToggleCollapse: () => void;
 }) {
   const db = useDb();
   const router = useRouter();
@@ -156,18 +160,19 @@ function Sidebar({ active, onNav, open }: {
   ];
   const nav2 = [
     { id: "membros", label: "Membros", icon: "team" },
+    { id: "integracoes", label: "APIs & Integrações", icon: "link" },
     { id: "config", label: "Configurações", icon: "settings" },
   ];
 
   return (
-    <aside className={"sidebar" + (open ? " open" : "")}>
+    <aside className={"sidebar" + (open ? " open" : "") + (collapsed ? " collapsed" : "")}>
       <div
         className="sb-brand"
         role="button"
         title="Ir para o dashboard"
         onClick={() => onNav("dashboard")}
       >
-        <span className="sb-mark" />Nexo
+        <span className="sb-mark" /><span className="sb-brand-text">Nexo</span>
       </div>
 
       <EventSwitcher />
@@ -178,9 +183,10 @@ function Sidebar({ active, onNav, open }: {
             key={it.id}
             className={"sb-link" + (active === it.id ? " active" : "")}
             onClick={() => onNav(it.id)}
+            title={collapsed ? it.label : undefined}
           >
             <span className="sb-ic"><Icon name={it.icon} /></span>
-            {it.label}
+            <span className="sb-label">{it.label}</span>
             {it.count > 0 && <span className={"count" + (it.warn ? " warn" : "")}>{it.count}</span>}
           </a>
         ))}
@@ -191,16 +197,35 @@ function Sidebar({ active, onNav, open }: {
             key={it.id}
             className={"sb-link" + (active === it.id ? " active" : "")}
             onClick={() => onNav(it.id)}
+            title={collapsed ? it.label : undefined}
           >
             <span className="sb-ic"><Icon name={it.icon} /></span>
-            {it.label}
+            <span className="sb-label">{it.label}</span>
           </a>
         ))}
       </nav>
 
       <div className="sb-foot">
+        <button
+          className="sb-link sb-collapse-btn"
+          onClick={onToggleCollapse}
+          title={collapsed ? "Expandir menu" : "Recolher menu"}
+        >
+          <span className="sb-ic"><Icon name={collapsed ? "chevRight" : "chevLeft"} /></span>
+          <span className="sb-label">Recolher menu</span>
+        </button>
         <div className="sb-user">
-          <span className="ava">{user?.initials ?? "?"}</span>
+          <span
+            className="ava"
+            title={collapsed ? (user?.name ?? "") : undefined}
+            style={
+              user?.avatar
+                ? { backgroundImage: `url("${user.avatar}")`, backgroundSize: "cover", backgroundPosition: "center" }
+                : undefined
+            }
+          >
+            {user?.avatar ? "" : (user?.initials ?? "?")}
+          </span>
           <div className="u-meta">
             <div className="u-name">{user?.name ?? "—"}</div>
             <div className="u-mail">{user?.email ?? ""}</div>
@@ -503,6 +528,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const route = routeIdFromPath(pathname);
   const user = ready ? currentUser(db) : undefined;
+  const collapsed = db.settings.sidebar_collapsed ?? false;
 
   // Hidrata o estado salvo do navegador uma única vez, no client
   // (sincroniza com o sistema externo; o re-render vem do useHydrated).
@@ -553,9 +579,15 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <ToastHost>
       <UiCtx.Provider value={{ openNewEvent: () => setNewEventOpen(true) }}>
-        <div className="app">
+        <div className={"app" + (collapsed ? " sb-collapsed" : "")}>
           {menuOpen && <div className="scrim" onClick={() => setMenuOpen(false)} />}
-          <Sidebar active={route} onNav={go} open={menuOpen} />
+          <Sidebar
+            active={route}
+            onNav={go}
+            open={menuOpen}
+            collapsed={collapsed}
+            onToggleCollapse={() => setSidebarCollapsed(!collapsed)}
+          />
           <div className="main">
             <Topbar
               crumb={CRUMBS[route]}

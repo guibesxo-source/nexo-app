@@ -6,6 +6,9 @@ import type {
   AttendeeStatus,
   ChecklistTemplate,
   ChecklistTemplateItem,
+  CustomMetric,
+  DashboardConfig,
+  DashboardWidget,
   Event,
   EventFormat,
   EventPriority,
@@ -21,6 +24,7 @@ import type {
 } from "@/types";
 import { initialsOf, fmtMoney } from "@/lib/format";
 import { endSession, mutate, newId, switchUser } from "./store";
+import { DEFAULT_DASHBOARD, customMetricIcon } from "./derived";
 
 const now = () => new Date().toISOString();
 
@@ -566,6 +570,137 @@ export function setSymplaToken(token: string | null) {
 
 export function setHubspotToken(token: string | null) {
   mutate((s) => ({ ...s, settings: { ...s.settings, hubspot_token: token } }));
+}
+
+export function setClickupToken(token: string | null) {
+  mutate((s) => ({ ...s, settings: { ...s.settings, clickup_token: token } }));
+}
+
+export function setSidebarCollapsed(collapsed: boolean) {
+  mutate((s) => ({ ...s, settings: { ...s.settings, sidebar_collapsed: collapsed } }));
+}
+
+/** Define/remove a foto de perfil do membro (data URL comprimido). */
+export function setProfilePhoto(userId: string, dataUrl: string | null) {
+  mutate((s) => ({
+    ...s,
+    members: s.members.map((m) => (m.id === userId ? { ...m, avatar: dataUrl } : m)),
+  }));
+}
+
+/* ---------- Dashboard customizável ---------- */
+
+/** Aplica uma transformação na config do dashboard (partindo do padrão se vazia). */
+function mutateDashboard(fn: (d: DashboardConfig) => DashboardConfig) {
+  mutate((s) => ({
+    ...s,
+    settings: { ...s.settings, dashboard: fn(s.settings.dashboard ?? DEFAULT_DASHBOARD) },
+  }));
+}
+
+export function addDashboardWidget(widget: Omit<DashboardWidget, "id">): string {
+  const id = newId();
+  mutateDashboard((d) => ({ ...d, widgets: [...d.widgets, { ...widget, id }] }));
+  return id;
+}
+
+export function removeDashboardWidget(id: string) {
+  mutateDashboard((d) => ({ ...d, widgets: d.widgets.filter((w) => w.id !== id) }));
+}
+
+export function updateDashboardWidget(id: string, patch: Partial<Omit<DashboardWidget, "id">>) {
+  mutateDashboard((d) => ({
+    ...d,
+    widgets: d.widgets.map((w) => (w.id === id ? { ...w, ...patch } : w)),
+  }));
+}
+
+/** Reordena os widgets para a ordem de ids dada (drag-and-drop); preserva sobras. */
+export function reorderDashboard(orderedIds: string[]) {
+  mutateDashboard((d) => {
+    const byId = new Map(d.widgets.map((w) => [w.id, w]));
+    const next = orderedIds
+      .map((id) => byId.get(id))
+      .filter((w): w is DashboardWidget => !!w);
+    for (const w of d.widgets) if (!orderedIds.includes(w.id)) next.push(w);
+    return { ...d, widgets: next };
+  });
+}
+
+/** Volta o dashboard ao layout padrão. */
+export function resetDashboard() {
+  mutate((s) => ({ ...s, settings: { ...s.settings, dashboard: null } }));
+}
+
+export type CustomMetricDraft = Pick<CustomMetric, "label" | "source" | "agg" | "filter" | "format">;
+
+/** Cria uma métrica personalizada e já adiciona um widget KPI para ela. */
+export function addCustomMetric(draft: CustomMetricDraft): string {
+  const id = newId();
+  mutateDashboard((d) => ({
+    ...d,
+    customMetrics: [...d.customMetrics, { ...draft, id, icon: customMetricIcon(draft.source) }],
+    widgets: [...d.widgets, { id: newId(), type: "kpi", metric: id, span: 1 }],
+  }));
+  return id;
+}
+
+export function removeCustomMetric(id: string) {
+  mutateDashboard((d) => ({
+    ...d,
+    customMetrics: d.customMetrics.filter((m) => m.id !== id),
+    widgets: d.widgets.filter((w) => !(w.type === "kpi" && w.metric === id)),
+  }));
+}
+
+/* ---------- Importação de tarefas em lote (ClickUp) ---------- */
+
+export type TaskImportDraft = {
+  title: string;
+  group: string;
+  phase?: TaskPhase;
+  due_date?: string | null;
+};
+
+/** Importa tarefas para o checklist do evento; deduplica por título. */
+export function importTasks(
+  eventId: string,
+  drafts: TaskImportDraft[]
+): { added: number; skipped: number } {
+  let added = 0;
+  let skipped = 0;
+  mutate((s) => {
+    const seen = new Set(
+      s.tasks.filter((t) => t.event_id === eventId).map((t) => t.title.trim().toLowerCase())
+    );
+    const fresh: Task[] = [];
+    for (const d of drafts) {
+      const key = d.title.trim().toLowerCase();
+      if (!key || seen.has(key)) {
+        skipped++;
+        continue;
+      }
+      seen.add(key);
+      fresh.push({
+        id: newId(),
+        event_id: eventId,
+        title: d.title,
+        group: d.group,
+        // sem fase explícita a view deriva do prazo (phaseOf) vs. data do evento
+        phase: d.phase,
+        status: "aberta",
+        assignee_id: null,
+        due_date: d.due_date ?? null,
+        created_at: now(),
+      });
+      added++;
+    }
+    return fresh.length ? { ...s, tasks: [...fresh, ...s.tasks] } : s;
+  });
+  if (added > 0) {
+    logActivity("🧩", ["", `${added} tarefa${added === 1 ? "" : "s"}`, " importada(s) do ClickUp"]);
+  }
+  return { added, skipped };
 }
 
 /* ---------- Buscas recentes (overlay de busca global) ---------- */

@@ -3,7 +3,6 @@
 // Login/cadastro com Supabase Auth (email + senha). No sucesso, espelha a
 // identidade na base local (login(name,email)) e entra na área logada.
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { displayNameFromUser } from "@/lib/auth";
 import { login } from "@/lib/db";
@@ -11,7 +10,6 @@ import { login } from "@/lib/db";
 type Mode = "login" | "signup";
 
 function AuthForm() {
-  const router = useRouter();
   const [mode, setMode] = useState<Mode>("login");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -60,12 +58,15 @@ function AuthForm() {
       }
       // espelha a sessão na base local (a UI lê de @/lib/db)
       login(displayNameFromUser(data.user), data.user.email ?? em);
+      // Navegação "hard" de propósito: com router.replace (transição client) o
+      // proxy do Next pode rodar antes do cookie de sessão propagar e devolver
+      // pro /login. window.location força uma requisição nova já autenticada.
       if (mode === "signup") {
         // confirma a criação e leva à tela de boas-vindas dentro do app
         setCreated(true);
-        setTimeout(() => router.replace("/welcome"), 1600);
+        setTimeout(() => window.location.replace("/welcome"), 1600);
       } else {
-        router.replace("/dashboard");
+        window.location.replace("/dashboard");
       }
     } catch {
       setError("Falha de conexão — tente de novo.");
@@ -185,21 +186,21 @@ function Brand() {
 }
 
 export default function LoginPage() {
-  const router = useRouter();
   const heroRef = useRef<HTMLElement>(null);
   const [checking, setChecking] = useState(true);
 
-  // Já autenticado? Vai direto para a área logada.
+  // Já autenticado? Vai direto para a área logada (navegação "hard" para o
+  // cookie de sessão entrar na requisição da rota protegida pelo proxy).
   useEffect(() => {
     const supabase = createClient();
     let active = true;
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!active) return;
-      if (user) router.replace("/dashboard");
+      if (user) window.location.replace("/dashboard");
       else setChecking(false);
     });
     return () => { active = false; };
-  }, [router]);
+  }, []);
 
   // O painel reage ao mouse: spotlight, grade e orbes em parallax (CSS vars).
   const onHeroMove = (e: React.MouseEvent<HTMLElement>) => {

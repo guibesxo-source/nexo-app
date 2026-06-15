@@ -42,6 +42,8 @@ export type Member = {
   initials: string;
   role: MemberRole;
   title: string; // função exibida no card (ex.: "Coordenadora")
+  /** Foto de perfil (data URL comprimido); ausente = mostra as iniciais. */
+  avatar?: string | null;
   created_at: string;
 };
 
@@ -150,12 +152,59 @@ export type Activity = {
   created_at: string;
 };
 
+/* ---------- Dashboard customizável (FR pós-MVP) ---------- */
+
+/** Tipos de widget do dashboard. "kpi" referencia uma métrica (catálogo ou custom). */
+export type DashboardWidgetType =
+  | "kpi"
+  | "chart-signups"
+  | "chart-confirm"
+  | "chart-category"
+  | "list-activity"
+  | "list-progress";
+
+export type DashboardWidget = {
+  id: string;
+  type: DashboardWidgetType;
+  /** Para "kpi": chave da métrica do catálogo OU id de uma métrica personalizada. */
+  metric?: string;
+  /** Largura em colunas numa grade de 4 (1–4). */
+  span?: number;
+};
+
+export type CustomMetricSource = "inscritos" | "financeiro" | "checklist";
+export type CustomMetricAgg = "count" | "sum";
+export type CustomMetricFormat = "number" | "money" | "percent";
+
+/** Métrica definida pelo usuário: base de dados + filtro + agregação. */
+export type CustomMetric = {
+  id: string;
+  label: string;
+  source: CustomMetricSource;
+  agg: CustomMetricAgg;
+  /** Filtro dependente da source (status do inscrito / tipo da transação / status da tarefa). */
+  filter?: string;
+  icon?: string;
+  format?: CustomMetricFormat;
+};
+
+export type DashboardConfig = {
+  widgets: DashboardWidget[];
+  customMetrics: CustomMetric[];
+};
+
 export type AppSettings = {
   toggles: Record<string, boolean>;
   /** Token da API pública do Sympla (integração de importação de inscritos). */
   sympla_token?: string | null;
   /** Private App token do HubSpot (portal pessoal do Nexo) para importar inscritos. */
   hubspot_token?: string | null;
+  /** API token pessoal do ClickUp (pk_…) para importar tarefas ao checklist. */
+  clickup_token?: string | null;
+  /** Sidebar recolhida (só ícones) — preferência por workspace/navegador. */
+  sidebar_collapsed?: boolean;
+  /** Layout do dashboard; ausente/null = usa o DEFAULT_DASHBOARD. */
+  dashboard?: DashboardConfig | null;
   /** Últimas buscas do overlay de busca global (mais recente primeiro). */
   recent_searches?: string[];
 };

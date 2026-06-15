@@ -1,31 +1,288 @@
 "use client";
 
-/* Dashboard do evento — FR-B3/F1: KPIs, gráfico de inscritos, atividade. */
+/* Dashboard do evento — agora customizável (FR pós-MVP): grade de widgets que
+   o usuário adiciona/remove/reordena/redimensiona; KPIs do catálogo + métricas
+   personalizadas + blocos (gráficos e listas). O layout vive em
+   settings.dashboard (cai no DEFAULT_DASHBOARD quando vazio). */
 import { useState } from "react";
-import { BarChart, Card, Donut, Empty, Icon, Kpi, PageHead, useToast } from "@/components/app/kit";
-import { ImportAttendeesModal } from "@/components/app/import-attendees";
-import { SymplaImportModal } from "@/components/app/sympla-import";
-import { HubspotImportModal } from "@/components/app/hubspot-import";
+import {
+  BarChart, Card, Donut, Empty, Field, Icon, Kpi, Modal, PageHead, useToast,
+} from "@/components/app/kit";
 import { useGo, useUi } from "@/components/app/shell";
 import {
+  addCustomMetric,
+  addDashboardWidget,
+  catalogMetric,
+  categoryTotals,
+  customMetricValue,
+  dashboardConfig,
   eventById,
   eventKpis,
+  formatMetricValue,
+  METRIC_CATALOG,
+  removeCustomMetric,
+  removeDashboardWidget,
+  reorderDashboard,
+  resetDashboard,
   selectedEvent,
+  updateDashboardWidget,
   useDb,
   weeklySignups,
+  type EventKpis,
 } from "@/lib/db";
 import { downloadCsv, toCsv } from "@/lib/csv";
 import { daysUntil, fmtMoney, relTime } from "@/lib/format";
+import type {
+  CustomMetricAgg,
+  CustomMetricSource,
+  DashboardConfig,
+  DashboardWidget,
+  DashboardWidgetType,
+} from "@/types";
+
+/* ---------- catálogos auxiliares ---------- */
+
+const BLOCKS: { type: DashboardWidgetType; label: string; icon: string; desc: string }[] = [
+  { type: "chart-signups", label: "Inscritos por semana", icon: "trending", desc: "Gráfico de novas inscrições" },
+  { type: "chart-confirm", label: "Confirmação", icon: "users", desc: "Donut de confirmados x pendentes" },
+  { type: "chart-category", label: "Gastos por categoria", icon: "wallet", desc: "Ranking de despesas do evento" },
+  { type: "list-activity", label: "Atividade recente", icon: "bell", desc: "Últimas ações do workspace" },
+  { type: "list-progress", label: "Progresso por área", icon: "checkSquare", desc: "Captação, orçamento, checklist" },
+];
+
+const FILTERS: Record<CustomMetricSource, { v: string; l: string }[]> = {
+  inscritos: [
+    { v: "todos", l: "Todos os inscritos" },
+    { v: "confirmado", l: "Confirmados" },
+    { v: "pendente", l: "Pendentes" },
+    { v: "checkin", l: "Check-ins" },
+  ],
+  financeiro: [
+    { v: "todos", l: "Todas as transações" },
+    { v: "entrada", l: "Receitas" },
+    { v: "saida", l: "Saídas" },
+  ],
+  checklist: [
+    { v: "todas", l: "Todas as tarefas" },
+    { v: "aberta", l: "Abertas" },
+    { v: "concluida", l: "Concluídas" },
+    { v: "atrasada", l: "Atrasadas" },
+  ],
+};
+
+const defaultFilter = (s: CustomMetricSource) => (s === "checklist" ? "todas" : "todos");
+
+/** Move dragId para a posição de overId, devolvendo a nova ordem de ids. */
+function reorderIds(ids: string[], dragId: string, overId: string): string[] {
+  if (dragId === overId) return ids;
+  const without = ids.filter((id) => id !== dragId);
+  const idx = without.indexOf(overId);
+  if (idx === -1) return ids;
+  without.splice(idx, 0, dragId);
+  return without;
+}
+
+/* ---------- modal: adicionar widget ---------- */
+
+function AddWidgetModal({ eventId, cfg, k, onClose }: {
+  eventId: string;
+  cfg: DashboardConfig;
+  k: EventKpis;
+  onClose: () => void;
+}) {
+  const db = useDb();
+  const toast = useToast();
+  const [tab, setTab] = useState<"kpi" | "blocks" | "custom">("kpi");
+  const [form, setForm] = useState<{
+    label: string; source: CustomMetricSource; agg: CustomMetricAgg; filter: string;
+  }>({ label: "", source: "inscritos", agg: "count", filter: "todos" });
+
+  const addKpi = (metric: string) => {
+    addDashboardWidget({ type: "kpi", metric, span: 1 });
+    toast("KPI adicionado ao dashboard");
+  };
+  const addBlock = (type: DashboardWidgetType) => {
+    addDashboardWidget({ type, span: 2 });
+    toast("Widget adicionado");
+    onClose();
+  };
+
+  const previewFormat = form.source === "financeiro" && form.agg === "sum" ? "money" : "number";
+  const previewValue = formatMetricValue(
+    customMetricValue(db, eventId, {
+      id: "_preview", label: form.label, source: form.source, agg: form.agg, filter: form.filter, format: previewFormat,
+    }),
+    previewFormat
+  );
+
+  const createCustom = () => {
+    if (!form.label.trim()) {
+      toast("Dê um nome para a métrica");
+      return;
+    }
+    addCustomMetric({
+      label: form.label.trim(),
+      source: form.source,
+      agg: form.agg,
+      filter: form.filter,
+      format: previewFormat,
+    });
+    toast("Métrica criada e adicionada");
+    onClose();
+  };
+
+  return (
+    <Modal
+      title="Adicionar widget"
+      onClose={onClose}
+      width={640}
+      footer={<button className="btn" onClick={onClose}>Concluir</button>}
+    >
+      <div className="row" style={{ gap: 6, marginBottom: 18, flexWrap: "wrap" }}>
+        <button className={"chip" + (tab === "kpi" ? " active" : "")} onClick={() => setTab("kpi")}>KPIs</button>
+        <button className={"chip" + (tab === "blocks" ? " active" : "")} onClick={() => setTab("blocks")}>Gráficos & listas</button>
+        <button className={"chip" + (tab === "custom" ? " active" : "")} onClick={() => setTab("custom")}>Métrica personalizada</button>
+      </div>
+
+      {tab === "kpi" && (
+        <>
+          <div className="aw-grid">
+            {METRIC_CATALOG.map((m) => (
+              <button key={m.key} className="aw-item" onClick={() => addKpi(m.key)}>
+                <span className="aw-ic"><Icon name={m.icon} size={17} /></span>
+                <span className="aw-meta">
+                  <span className="aw-nm">{m.label}</span>
+                  <span className="aw-val">{formatMetricValue(m.value(k), m.format)} · clique para adicionar</span>
+                </span>
+                <Icon name="plus" size={15} />
+              </button>
+            ))}
+          </div>
+
+          {cfg.customMetrics.length > 0 && (
+            <>
+              <div className="integ-section" style={{ marginTop: 22 }}>Suas métricas</div>
+              <div className="aw-grid">
+                {cfg.customMetrics.map((m) => (
+                  <div key={m.id} className="aw-item">
+                    <span className="aw-ic"><Icon name={m.icon ?? "sparkle"} size={17} /></span>
+                    <span className="aw-meta">
+                      <span className="aw-nm">{m.label}</span>
+                      <span className="aw-val">
+                        {formatMetricValue(customMetricValue(db, eventId, m), m.format ?? "number")}
+                      </span>
+                    </span>
+                    <button className="row-action" title="Adicionar de novo" onClick={() => addKpi(m.id)}>
+                      <Icon name="plus" size={15} />
+                    </button>
+                    <button
+                      className="row-action danger aw-del"
+                      title="Excluir métrica"
+                      onClick={() => { removeCustomMetric(m.id); toast("Métrica excluída"); }}
+                    >
+                      <Icon name="trash" size={15} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </>
+      )}
+
+      {tab === "blocks" && (
+        <div className="aw-grid">
+          {BLOCKS.map((b) => (
+            <button key={b.type} className="aw-item" onClick={() => addBlock(b.type)}>
+              <span className="aw-ic"><Icon name={b.icon} size={17} /></span>
+              <span className="aw-meta">
+                <span className="aw-nm">{b.label}</span>
+                <span className="aw-val">{b.desc}</span>
+              </span>
+              <Icon name="plus" size={15} />
+            </button>
+          ))}
+        </div>
+      )}
+
+      {tab === "custom" && (
+        <>
+          <Field label="Nome da métrica">
+            <input
+              className="input"
+              placeholder="Ex.: Leads VIP, Saídas pendentes…"
+              value={form.label}
+              onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
+              autoFocus
+            />
+          </Field>
+          <div className="form-grid">
+            <Field label="Base de dados">
+              <select
+                className="input"
+                value={form.source}
+                onChange={(e) => {
+                  const source = e.target.value as CustomMetricSource;
+                  setForm((f) => ({ ...f, source, filter: defaultFilter(source), agg: "count" }));
+                }}
+              >
+                <option value="inscritos">Inscritos</option>
+                <option value="financeiro">Financeiro</option>
+                <option value="checklist">Checklist</option>
+              </select>
+            </Field>
+            <Field label="Filtro">
+              <select
+                className="input"
+                value={form.filter}
+                onChange={(e) => setForm((f) => ({ ...f, filter: e.target.value }))}
+              >
+                {FILTERS[form.source].map((o) => (
+                  <option key={o.v} value={o.v}>{o.l}</option>
+                ))}
+              </select>
+            </Field>
+          </div>
+          {form.source === "financeiro" && (
+            <Field label="Cálculo">
+              <select
+                className="input"
+                value={form.agg}
+                onChange={(e) => setForm((f) => ({ ...f, agg: e.target.value as CustomMetricAgg }))}
+              >
+                <option value="count">Quantidade de lançamentos</option>
+                <option value="sum">Soma dos valores (R$)</option>
+              </select>
+            </Field>
+          )}
+
+          <div className="import-summary" style={{ marginTop: 4 }}>
+            <Icon name="bolt" size={15} />
+            <span>Prévia para este evento: <b>{previewValue}</b></span>
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+            <button className="btn btn-primary" onClick={createCustom}>
+              <Icon name="plus" size={15} />Criar e adicionar
+            </button>
+          </div>
+        </>
+      )}
+    </Modal>
+  );
+}
+
+/* ---------- view ---------- */
 
 export function Dashboard({ eventId }: { eventId?: string }) {
   const db = useDb();
   const go = useGo();
   const toast = useToast();
   const { openNewEvent } = useUi();
-  const [importing, setImporting] = useState(false);
-  const [linkOpen, setLinkOpen] = useState(false);
-  const [symplaOpen, setSymplaOpen] = useState(false);
-  const [hubspotOpen, setHubspotOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [overId, setOverId] = useState<string | null>(null);
 
   const ev = eventId ? eventById(db, eventId) : selectedEvent(db);
 
@@ -47,12 +304,19 @@ export function Dashboard({ eventId }: { eventId?: string }) {
     );
   }
 
+  const cfg = dashboardConfig(db);
   const k = eventKpis(db, ev.id);
   const weeks = weeklySignups(db, ev.id);
-  const thisWeek = weeks[weeks.length - 1]?.v ?? 0;
+  const cats = categoryTotals(db, ev.id);
   const days = daysUntil(ev.starts_at);
   const checklistPct = k.tasksTotal ? Math.round((k.tasksDone / k.tasksTotal) * 100) : 0;
   const capacityPct = ev.capacity ? Math.min(100, Math.round((k.total / ev.capacity) * 100)) : 0;
+  const progress = [
+    { nm: "Captação de inscritos", v: capacityPct },
+    { nm: "Orçamento executado", v: Math.min(100, k.budgetPct) },
+    { nm: "Checklist de produção", v: checklistPct },
+    { nm: "Taxa de confirmação", v: k.confirmRate },
+  ];
 
   const exportSummary = () => {
     const csv = toCsv(
@@ -76,184 +340,228 @@ export function Dashboard({ eventId }: { eventId?: string }) {
     toast("Resumo exportado (CSV)");
   };
 
-  const progress = [
-    { nm: "Captação de inscritos", v: capacityPct },
-    { nm: "Orçamento executado", v: Math.min(100, k.budgetPct) },
-    { nm: "Checklist de produção", v: checklistPct },
-    { nm: "Taxa de confirmação", v: k.confirmRate },
-  ];
+  const ids = cfg.widgets.map((w) => w.id);
+  const onDrop = (targetId: string) => {
+    if (dragId && dragId !== targetId) reorderDashboard(reorderIds(ids, dragId, targetId));
+    setDragId(null);
+    setOverId(null);
+  };
+
+  const resolveKpi = (w: DashboardWidget) => {
+    const key = w.metric ?? "";
+    const cat = catalogMetric(key);
+    if (cat) {
+      return { icon: cat.icon, tone: cat.tone, label: cat.label, value: formatMetricValue(cat.value(k), cat.format) };
+    }
+    const cm = cfg.customMetrics.find((m) => m.id === key);
+    if (cm) {
+      return {
+        icon: cm.icon ?? "sparkle", tone: undefined as string | undefined, label: cm.label,
+        value: formatMetricValue(customMetricValue(db, ev.id, cm), cm.format ?? "number"),
+      };
+    }
+    return { icon: "sparkle", tone: undefined as string | undefined, label: "Métrica removida", value: "—" };
+  };
+
+  const renderWidget = (w: DashboardWidget) => {
+    switch (w.type) {
+      case "kpi": {
+        const r = resolveKpi(w);
+        return <Kpi icon={r.icon} iconTone={r.tone} value={r.value} label={r.label} />;
+      }
+      case "chart-signups":
+        return (
+          <Card title="Inscritos por semana" link={editing ? undefined : "Ver inscritos"} onLink={() => go("inscritos")}>
+            <BarChart data={weeks} lastAlt />
+          </Card>
+        );
+      case "chart-confirm":
+        return (
+          <Card title="Confirmação">
+            <Donut
+              pct={k.confirmRate}
+              label="conf."
+              legend={[
+                { color: "var(--green)", label: "Confirmados", value: String(k.confirmed) },
+                { color: "#E8E8E5", label: "Pendentes", value: String(k.pending) },
+              ]}
+            />
+          </Card>
+        );
+      case "chart-category":
+        return (
+          <Card title="Gastos por categoria">
+            {cats.length === 0 ? (
+              <Empty icon="wallet" title="Sem lançamentos" sub="As despesas do evento aparecem aqui." />
+            ) : (
+              <div className="cat-list">
+                {cats.slice(0, 6).map((c) => (
+                  <div className="cat-row" key={c.id}>
+                    <span className="cat-nm">{c.name}</span>
+                    <span className="cat-bar"><i style={{ width: c.pct + "%" }} /></span>
+                    <span className="cat-vl">{fmtMoney(c.value)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        );
+      case "list-activity":
+        return (
+          <Card title="Atividade recente">
+            {db.activity.length === 0 ? (
+              <Empty icon="bolt" title="Sem atividade ainda" sub="As ações da equipe aparecem aqui." />
+            ) : (
+              <div className="activity">
+                {db.activity.slice(0, 5).map((a) => (
+                  <div className="act-row" key={a.id}>
+                    <span className="act-ic">{a.icon}</span>
+                    <div className="act-body">
+                      <div className="act-txt">{a.text.map((s, j) => (j % 2 ? <b key={j}>{s}</b> : s))}</div>
+                      <div className="act-time">{relTime(a.created_at)}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        );
+      case "list-progress":
+        return (
+          <Card title="Progresso por área">
+            <div className="progress-list">
+              {progress.map((p, i) => (
+                <div className="prog-item" key={i}>
+                  <div className="prog-top">
+                    <span className="nm">{p.nm}</span>
+                    <span className="vl">{p.v}%</span>
+                  </div>
+                  <div className="prog-bar"><i style={{ width: p.v + "%" }} /></div>
+                </div>
+              ))}
+            </div>
+            <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--line-2)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div>
+                <div style={{ fontSize: 12.5, color: "var(--dim)" }}>
+                  {days >= 0 ? "Dias para o evento" : "Evento realizado"}
+                </div>
+                <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: "-0.02em" }}>
+                  {days >= 0 ? `${days} dia${days === 1 ? "" : "s"}` : `há ${Math.abs(days)} dias`}
+                </div>
+              </div>
+              {!editing && (
+                <button className="btn btn-dark btn-sm" onClick={() => go("checklist")}>Ver checklist</button>
+              )}
+            </div>
+          </Card>
+        );
+      default:
+        return null;
+    }
+  };
 
   return (
     <div className="view">
       <PageHead
         eyebrow={ev.name}
         title="Visão geral"
-        sub={`Atualizado agora · ${db.members.length} membros na organização`}
+        sub={editing ? "Arraste para reordenar · use os controles em cada card" : `Atualizado agora · ${db.members.length} membros na organização`}
         actions={
-          <>
-            <button className="btn" onClick={() => setImporting(true)}>
-              <Icon name="upload" size={15} />Importar lista
-            </button>
-            <span className="menu-wrap">
+          editing ? (
+            <>
+              <button className="btn btn-dark" onClick={() => setAdding(true)}>
+                <Icon name="plus" size={15} />Adicionar widget
+              </button>
               <button
                 className="btn"
-                onClick={() => setLinkOpen((o) => !o)}
-                aria-haspopup="menu"
-                aria-expanded={linkOpen}
+                onClick={() => { resetDashboard(); toast("Dashboard restaurado ao padrão"); }}
               >
-                <Icon name="link" size={15} />Linkar dados
-                <Icon name={linkOpen ? "chevUp" : "chevDown"} size={14} />
+                Restaurar padrão
               </button>
-              {linkOpen && (
-                <>
-                  <span className="menu-scrim" onClick={() => setLinkOpen(false)} />
-                  <span className="menu left" role="menu">
-                    <button
-                      className="menu-item"
-                      onClick={() => { setLinkOpen(false); setSymplaOpen(true); }}
-                    >
-                      Sympla
-                    </button>
-                    <button
-                      className="menu-item"
-                      onClick={() => { setLinkOpen(false); setHubspotOpen(true); }}
-                    >
-                      HubSpot
-                    </button>
-                  </span>
-                </>
-              )}
-            </span>
-            <button className="btn" onClick={exportSummary}>
-              <Icon name="download" size={15} />Exportar
-            </button>
-            <button className="btn btn-primary" onClick={openNewEvent}>
-              <Icon name="plus" size={15} />Novo evento
-            </button>
-          </>
+              <button className="btn btn-primary" onClick={() => setEditing(false)}>
+                <Icon name="check" size={15} />Concluir
+              </button>
+            </>
+          ) : (
+            <>
+              <button className="btn" onClick={exportSummary}>
+                <Icon name="download" size={15} />Exportar
+              </button>
+              <button className="btn" onClick={() => setEditing(true)}>
+                <Icon name="grid" size={15} />Personalizar
+              </button>
+              <button className="btn btn-primary" onClick={openNewEvent}>
+                <Icon name="plus" size={15} />Novo evento
+              </button>
+            </>
+          )
         }
       />
 
-      {importing && <ImportAttendeesModal eventId={ev.id} onClose={() => setImporting(false)} />}
-      {symplaOpen && (
-        <SymplaImportModal eventId={ev.id} eventName={ev.name} onClose={() => setSymplaOpen(false)} />
-      )}
-      {hubspotOpen && (
-        <HubspotImportModal eventId={ev.id} eventName={ev.name} onClose={() => setHubspotOpen(false)} />
-      )}
-
-      <div className="kpi-grid">
-        <Kpi
-          icon="users" iconTone="green"
-          value={String(k.total)}
-          label="Inscritos totais"
-          delta={thisWeek > 0 ? `+${thisWeek} esta semana` : "sem novos"}
-          deltaDir={thisWeek > 0 ? "up" : "flat"}
-        />
-        <Kpi
-          icon="check"
-          value={String(k.confirmed)}
-          label={`Confirmados · ${k.confirmRate}%`}
-          delta={`${k.pending} pendentes`}
-          deltaDir={k.pending > 0 ? "flat" : "up"}
-        />
-        <Kpi
-          icon="wallet"
-          value={`${k.budgetPct}%`}
-          label="Orçamento usado"
-          delta={k.budgetPct <= 100 ? "no plano" : "estourado"}
-          deltaDir={k.budgetPct <= 100 ? "flat" : "down"}
-        />
-        <Kpi
-          icon="checkSquare"
-          value={`${k.tasksDone}/${k.tasksTotal}`}
-          label="Tarefas concluídas"
-          delta={k.tasksLate > 0 ? `${k.tasksLate} atrasadas` : "em dia"}
-          deltaDir={k.tasksLate > 0 ? "down" : "up"}
-        />
-      </div>
-
-      <div className="grid-2" style={{ marginBottom: 16 }}>
-        <Card title="Inscritos por semana" link="Ver inscritos" onLink={() => go("inscritos")}>
-          <BarChart data={weeks} lastAlt />
-          <div style={{ display: "flex", gap: 18, marginTop: 16, fontSize: 12.5, color: "var(--dim)" }}>
-            <span className="row" style={{ gap: 7 }}>
-              <span style={{ width: 10, height: 10, borderRadius: 3, background: "var(--green)", display: "inline-block" }} />
-              Novas inscrições
-            </span>
-            <span className="row" style={{ gap: 7 }}>
-              <span style={{ width: 10, height: 10, borderRadius: 3, background: "#E2E2DE", display: "inline-block" }} />
-              Semana atual (parcial)
-            </span>
-          </div>
-        </Card>
-
-        <Card title="Confirmação">
-          <Donut
-            pct={k.confirmRate}
-            label="conf."
-            legend={[
-              { color: "var(--green)", label: "Confirmados", value: String(k.confirmed) },
-              { color: "#E8E8E5", label: "Pendentes", value: String(k.pending) },
-            ]}
-          />
-          <div style={{ marginTop: 18, paddingTop: 16, borderTop: "1px solid var(--line-2)", fontSize: 12.5, color: "var(--dim)" }}>
-            Custo por inscrito:{" "}
-            <b style={{ color: "var(--text)" }}>
-              {k.total > 0 ? fmtMoney(k.costPerAttendee) : "—"}
-            </b>
-          </div>
-        </Card>
-      </div>
-
-      <div className="grid-2">
-        <Card title="Atividade recente">
-          {db.activity.length === 0 ? (
-            <Empty icon="bolt" title="Sem atividade ainda" sub="As ações da equipe aparecem aqui." />
-          ) : (
-            <div className="activity">
-              {db.activity.slice(0, 5).map((a) => (
-                <div className="act-row" key={a.id}>
-                  <span className="act-ic">{a.icon}</span>
-                  <div className="act-body">
-                    <div className="act-txt">
-                      {a.text.map((s, j) => (j % 2 ? <b key={j}>{s}</b> : s))}
-                    </div>
-                    <div className="act-time">{relTime(a.created_at)}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
-
-        <Card title="Progresso por área">
-          <div className="progress-list">
-            {progress.map((p, i) => (
-              <div className="prog-item" key={i}>
-                <div className="prog-top">
-                  <span className="nm">{p.nm}</span>
-                  <span className="vl">{p.v}%</span>
-                </div>
-                <div className="prog-bar"><i style={{ width: p.v + "%" }} /></div>
-              </div>
-            ))}
-          </div>
-          <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--line-2)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div>
-              <div style={{ fontSize: 12.5, color: "var(--dim)" }}>
-                {days >= 0 ? "Dias para o evento" : "Evento realizado"}
-              </div>
-              <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: "-0.02em" }}>
-                {days >= 0 ? `${days} dia${days === 1 ? "" : "s"}` : `há ${Math.abs(days)} dias`}
-              </div>
-            </div>
-            <button className="btn btn-dark btn-sm" onClick={() => go("checklist")}>
-              Ver checklist
+      {cfg.widgets.length === 0 ? (
+        <Empty
+          icon="grid"
+          title="Dashboard vazio"
+          sub="Adicione KPIs, gráficos e métricas personalizadas do seu jeito."
+          action={
+            <button className="btn btn-primary" onClick={() => { setEditing(true); setAdding(true); }}>
+              <Icon name="plus" size={15} />Adicionar widget
             </button>
-          </div>
-        </Card>
-      </div>
+          }
+        />
+      ) : (
+        <div className={"dash-grid" + (editing ? " editing" : "")}>
+          {cfg.widgets.map((w) => (
+            <div
+              key={w.id}
+              className={
+                "dash-widget" +
+                (editing ? " editing" : "") +
+                (dragId === w.id ? " dragging" : "") +
+                (overId === w.id && dragId && dragId !== w.id ? " drag-over" : "")
+              }
+              style={{ gridColumn: `span ${Math.min(4, Math.max(1, w.span ?? 1))}` }}
+              draggable={editing}
+              onDragStart={editing ? () => setDragId(w.id) : undefined}
+              onDragOver={editing ? (e) => { e.preventDefault(); setOverId(w.id); } : undefined}
+              onDrop={editing ? () => onDrop(w.id) : undefined}
+              onDragEnd={() => { setDragId(null); setOverId(null); }}
+            >
+              {editing && (
+                <div className="dash-tools">
+                  <span className="dash-grip" title="Arraste para reordenar"><Icon name="grip" size={15} /></span>
+                  <button
+                    className="dash-tool"
+                    title="Alternar largura"
+                    onClick={() =>
+                      updateDashboardWidget(
+                        w.id,
+                        w.type === "kpi"
+                          ? { span: (w.span ?? 1) >= 2 ? 1 : 2 }
+                          : { span: (w.span ?? 2) >= 4 ? 2 : 4 }
+                      )
+                    }
+                  >
+                    {(w.span ?? (w.type === "kpi" ? 1 : 2)) >= 4 ? "▭" : (w.span ?? 1) >= 2 ? "½" : "¼"}
+                  </button>
+                  <button
+                    className="dash-tool danger"
+                    title="Remover widget"
+                    onClick={() => { removeDashboardWidget(w.id); toast("Widget removido"); }}
+                  >
+                    <Icon name="x" size={14} />
+                  </button>
+                </div>
+              )}
+              <div className="dash-body">{renderWidget(w)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {adding && (
+        <AddWidgetModal eventId={ev.id} cfg={cfg} k={k} onClose={() => setAdding(false)} />
+      )}
     </div>
   );
 }

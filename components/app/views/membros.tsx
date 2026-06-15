@@ -126,7 +126,7 @@ export function Membros() {
                   />
                 </span>
               )}
-              <Avatar initials={m.initials} size="lg" />
+              <Avatar initials={m.initials} src={m.avatar} size="lg" />
               <div className="nm">{m.name}</div>
               <div className="role">{ROLE_LABEL[m.role]} · {m.title}</div>
               <div className="stats">

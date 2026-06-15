@@ -1,17 +1,19 @@
 "use client";
 
 /* Configurações — perfil, organização e preferências persistidos. */
-import { useState } from "react";
-import { Avatar, Card, Field, PageHead, Toggle, useToast } from "@/components/app/kit";
+import { useRef, useState } from "react";
+import { Avatar, Card, Field, Icon, PageHead, Toggle, useToast } from "@/components/app/kit";
 import { useGo } from "@/components/app/shell";
 import {
   currentUser,
   resetDemo,
+  setProfilePhoto,
   setToggle,
   updateProfile,
   updateWorkspace,
   useDb,
 } from "@/lib/db";
+import { compressImage } from "@/lib/files";
 
 const SECTIONS: [string, string][] = [
   ["geral", "Geral"],
@@ -57,6 +59,21 @@ export function Config() {
     (e: React.ChangeEvent<HTMLInputElement>) =>
       setForm((f) => ({ ...f, [key]: e.target.value }));
 
+  const fileRef = useRef<HTMLInputElement>(null);
+  const onPickPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // permite re-selecionar o mesmo arquivo
+    if (!file || !user) return;
+    try {
+      // comprime para um quadrado leve (~256px) — cabe no localStorage
+      const dataUrl = await compressImage(file, 256, 0.85);
+      setProfilePhoto(user.id, dataUrl);
+      toast("Foto de perfil atualizada");
+    } catch {
+      toast("Não consegui ler essa imagem");
+    }
+  };
+
   const save = () => {
     if (user && form.userName.trim()) {
       updateProfile(user.id, { name: form.userName.trim(), email: form.userEmail.trim() });
@@ -82,7 +99,13 @@ export function Config() {
             <a
               key={id}
               className={navSec === id ? "active" : ""}
-              onClick={() => (id === "team" ? go("membros") : setNavSec(id))}
+              onClick={() =>
+                id === "team"
+                  ? go("membros")
+                  : id === "api"
+                    ? go("integracoes")
+                    : setNavSec(id)
+              }
             >
               {label}
             </a>
@@ -93,11 +116,45 @@ export function Config() {
           {navSec === "geral" && (
             <Card style={{ marginBottom: 20 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 20 }}>
-                <Avatar initials={user?.initials ?? "?"} size="lg" />
+                <button
+                  type="button"
+                  className="avatar-edit"
+                  onClick={() => fileRef.current?.click()}
+                  title="Alterar foto de perfil"
+                >
+                  <Avatar initials={user?.initials ?? "?"} src={user?.avatar} size="lg" />
+                  <span className="avatar-edit-badge"><Icon name="camera" size={12} /></span>
+                </button>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/*"
+                  style={{ display: "none" }}
+                  onChange={onPickPhoto}
+                />
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 16, fontWeight: 700 }}>{user?.name}</div>
                   <div style={{ fontSize: 13, color: "var(--dim)" }}>
                     {user?.email} · {user?.role === "owner" ? "Owner" : user?.role}
+                  </div>
+                  <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                    <button className="btn btn-sm" onClick={() => fileRef.current?.click()}>
+                      <Icon name="camera" size={14} />
+                      {user?.avatar ? "Trocar foto" : "Adicionar foto"}
+                    </button>
+                    {user?.avatar && (
+                      <button
+                        className="btn btn-sm"
+                        onClick={() => {
+                          if (user) {
+                            setProfilePhoto(user.id, null);
+                            toast("Foto removida");
+                          }
+                        }}
+                      >
+                        Remover
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -140,19 +197,6 @@ export function Config() {
                   <div className="sr-desc">
                     Você está no acesso de fundador do beta privado — sem cobrança durante esta fase.
                     A assinatura via Stripe (mensal/anual com preço de fundador travado) chega com o beta.
-                  </div>
-                </div>
-              </div>
-            </Card>
-          )}
-
-          {navSec === "api" && (
-            <Card title="API & Integrações" style={{ marginBottom: 20 }}>
-              <div className="set-row">
-                <div>
-                  <div className="sr-name">Em breve</div>
-                  <div className="sr-desc">
-                    Import de inscritos via CSV (Sympla/Eventbrite) e API pública estão no roadmap pós-MVP.
                   </div>
                 </div>
               </div>

@@ -54,6 +54,10 @@ export const I: Record<string, string> = {
   image: "M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zM8.5 10a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM21 15l-5-5L5 21",
   sun: "M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10zM12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42",
   moon: "M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z",
+  chevLeft: "M15 18l-6-6 6-6",
+  panelLeft: "M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM9 3v18",
+  grip: "M9 5h.01M9 12h.01M9 19h.01M15 5h.01M15 12h.01M15 19h.01",
+  camera: "M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2zM12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z",
 };
 
 export function Icon({ name, size }: { name: string; size?: number }) {
@@ -89,11 +93,20 @@ export function avatarColor(initials: string): string {
   return AV_PALETTE[acc % AV_PALETTE.length];
 }
 
-export function Avatar({ initials, color, size }: { initials: string; color?: string; size?: string }) {
+export function Avatar({ initials, color, size, src }: {
+  initials: string; color?: string; size?: string; src?: string | null;
+}) {
   const c = color || avatarColor(initials || "?");
   return (
-    <span className={"avatar" + (size ? " " + size : "")} style={{ background: c }}>
-      {initials}
+    <span
+      className={"avatar" + (size ? " " + size : "")}
+      style={
+        src
+          ? { backgroundImage: `url("${src}")`, backgroundSize: "cover", backgroundPosition: "center" }
+          : { background: c }
+      }
+    >
+      {src ? "" : initials}
     </span>
   );
 }

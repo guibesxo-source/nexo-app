@@ -13,6 +13,7 @@ const PROTECTED = [
   "/financeiro",
   "/checklist",
   "/membros",
+  "/integracoes",
   "/config",
 ];
 
