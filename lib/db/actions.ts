@@ -14,6 +14,7 @@ import type {
   EventPriority,
   Member,
   MemberRole,
+  SymplaEventLink,
   Task,
   TaskAttachment,
   TaskPhase,
@@ -141,6 +142,14 @@ export function deleteEvent(id: string) {
 export type AttendeeDraft = Pick<Attendee, "name" | "email" | "company"> & {
   ticket: TicketType;
   status: AttendeeStatus;
+  external_source?: Attendee["external_source"];
+  external_id?: string | null;
+};
+
+export type AttendeeImportResult = {
+  added: number;
+  skipped: number;
+  updated: number;
 };
 
 export function addAttendee(eventId: string, draft: AttendeeDraft): string {
@@ -173,7 +182,7 @@ export function setAttendeeStatus(id: string, status: AttendeeStatus) {
 export function importAttendees(
   eventId: string,
   drafts: AttendeeDraft[]
-): { added: number; skipped: number } {
+): AttendeeImportResult {
   let added = 0;
   let skipped = 0;
   mutate((s) => {
@@ -196,7 +205,107 @@ export function importAttendees(
   if (added > 0) {
     logActivity("📥", ["", `${added} inscrito${added === 1 ? "" : "s"}`, " importados para o evento"]);
   }
-  return { added, skipped };
+  return { added, skipped, updated: 0 };
+}
+
+const externalKey = (a: Pick<AttendeeDraft, "external_source" | "external_id">) =>
+  a.external_source && a.external_id ? `${a.external_source}:${a.external_id}` : null;
+
+const emailKey = (email: string) => email.trim().toLowerCase();
+
+function sameAttendeeData(a: Attendee, d: AttendeeDraft): boolean {
+  return (
+    a.name === d.name &&
+    a.email === d.email &&
+    a.company === d.company &&
+    a.ticket === d.ticket &&
+    a.status === d.status &&
+    (a.external_source ?? null) === (d.external_source ?? null) &&
+    (a.external_id ?? null) === (d.external_id ?? null)
+  );
+}
+
+/**
+ * Sincroniza inscritos vindos de uma integracao.
+ *
+ * Diferente do import CSV, isto atualiza registros existentes e usa
+ * external_source/external_id como chave primaria. Para corrigir importacoes
+ * antigas do Sympla que foram deduplicadas por email, a primeira ocorrencia de
+ * um email legado e adotada pelo external_id; os ingressos seguintes com o
+ * mesmo email entram como novas linhas.
+ */
+export function syncAttendees(eventId: string, drafts: AttendeeDraft[]): AttendeeImportResult {
+  let added = 0;
+  let skipped = 0;
+  let updated = 0;
+
+  mutate((s) => {
+    const existing = s.attendees.filter((a) => a.event_id === eventId);
+    const byExternal = new Map<string, Attendee>();
+    const legacyByEmail = new Map<string, Attendee[]>();
+
+    for (const a of existing) {
+      const xk = externalKey(a);
+      if (xk) byExternal.set(xk, a);
+      else {
+        const ek = emailKey(a.email);
+        legacyByEmail.set(ek, [...(legacyByEmail.get(ek) ?? []), a]);
+      }
+    }
+
+    const consumedLegacy = new Set<string>();
+    const next = [...s.attendees];
+    const fresh: Attendee[] = [];
+
+    const replace = (id: string, draft: AttendeeDraft) => {
+      const idx = next.findIndex((a) => a.id === id);
+      if (idx === -1) return;
+      const patched: Attendee = { ...next[idx], ...draft };
+      if (sameAttendeeData(next[idx], patched)) {
+        skipped++;
+        return;
+      }
+      next[idx] = patched;
+      updated++;
+    };
+
+    for (const d of drafts) {
+      const xk = externalKey(d);
+      const ek = emailKey(d.email);
+      const byX = xk ? byExternal.get(xk) : undefined;
+      if (byX) {
+        replace(byX.id, d);
+        continue;
+      }
+
+      const legacy = (legacyByEmail.get(ek) ?? []).find((a) => !consumedLegacy.has(a.id));
+      if (xk && legacy) {
+        consumedLegacy.add(legacy.id);
+        byExternal.set(xk, legacy);
+        replace(legacy.id, d);
+        continue;
+      }
+
+      if (!xk && existing.some((a) => emailKey(a.email) === ek)) {
+        skipped++;
+        continue;
+      }
+
+      fresh.push({ ...d, id: newId(), event_id: eventId, created_at: now() });
+      added++;
+    }
+
+    return fresh.length || updated > 0 ? { ...s, attendees: [...fresh, ...next] } : s;
+  });
+
+  if (added > 0 || updated > 0) {
+    logActivity("📥", [
+      "",
+      `${added} novo${added === 1 ? "" : "s"} / ${updated} atualizado${updated === 1 ? "" : "s"}`,
+      " na sincronizacao de inscritos",
+    ]);
+  }
+  return { added, skipped, updated };
 }
 
 export function removeAttendee(id: string) {
@@ -566,6 +675,24 @@ export function updateProfile(userId: string, patch: Partial<Pick<Member, "name"
 
 export function setSymplaToken(token: string | null) {
   mutate((s) => ({ ...s, settings: { ...s.settings, sympla_token: token } }));
+}
+
+export function setSymplaEventLink(
+  eventId: string,
+  link: Omit<SymplaEventLink, "linked_at"> & { linked_at?: string } | null
+) {
+  mutate((s) => {
+    const links = { ...(s.settings.sympla_event_links ?? {}) };
+    if (!link) delete links[eventId];
+    else {
+      links[eventId] = {
+        ...links[eventId],
+        ...link,
+        linked_at: link.linked_at ?? links[eventId]?.linked_at ?? now(),
+      };
+    }
+    return { ...s, settings: { ...s.settings, sympla_event_links: links } };
+  });
 }
 
 export function setHubspotToken(token: string | null) {

@@ -69,6 +69,10 @@ export type Attendee = {
   company: string;
   ticket: TicketType;
   status: AttendeeStatus;
+  /** Origem externa do registro, quando veio de uma integracao. */
+  external_source?: "sympla" | "hubspot" | "csv" | null;
+  /** ID estavel na origem externa (ex.: ingresso/participante do Sympla). */
+  external_id?: string | null;
   created_at: string;
 };
 
@@ -193,10 +197,22 @@ export type DashboardConfig = {
   customMetrics: CustomMetric[];
 };
 
+export type SymplaEventLink = {
+  sympla_event_id: string;
+  sympla_event_name?: string;
+  linked_at: string;
+  last_sync_at?: string;
+  last_remote_count?: number;
+  last_imported_count?: number;
+  last_invalid_count?: number;
+};
+
 export type AppSettings = {
   toggles: Record<string, boolean>;
   /** Token da API pública do Sympla (integração de importação de inscritos). */
   sympla_token?: string | null;
+  /** Vínculos evento Nexo -> evento Sympla para sync automático. */
+  sympla_event_links?: Record<string, SymplaEventLink>;
   /** Private App token do HubSpot (portal pessoal do Nexo) para importar inscritos. */
   hubspot_token?: string | null;
   /** API token pessoal do ClickUp (pk_…) para importar tarefas ao checklist. */

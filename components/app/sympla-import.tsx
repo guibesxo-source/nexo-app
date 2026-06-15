@@ -1,55 +1,12 @@
 "use client";
 
-/* Conectar ao Sympla e puxar inscritos — fluxo em dois passos: token →
-   lista de eventos do Sympla → importar participantes para o evento ativo.
-   A chamada à API passa pelo proxy /api/sympla (token no header, sem CORS). */
+/* Conectar ao Sympla e sincronizar inscritos para o evento ativo. */
 import { useState } from "react";
 import { Badge, Field, Icon, Modal, useToast } from "@/components/app/kit";
-import { importAttendees, setSymplaToken, useDb, type AttendeeDraft } from "@/lib/db";
-import { attendeeSchema } from "@/lib/validations/attendee";
-import { mapTicket } from "@/components/app/import-attendees";
+import { callSympla, syncSymplaEvent } from "@/components/app/sympla-sync";
+import { setSymplaToken, useDb } from "@/lib/db";
+import type { SymplaEvent } from "@/lib/integrations/sympla";
 import { fmtDate } from "@/lib/format";
-
-type SymplaEvent = {
-  id: number | string;
-  name?: string;
-  start_date?: string;
-  published?: number | boolean;
-};
-
-type SymplaParticipant = {
-  first_name?: string;
-  last_name?: string;
-  email?: string;
-  ticket_name?: string;
-  checkin?: { check_in?: boolean | number };
-};
-
-async function callSympla(body: Record<string, string>): Promise<unknown[]> {
-  const res = await fetch("/api/sympla", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const json = (await res.json().catch(() => null)) as { data?: unknown[]; error?: string } | null;
-  if (!res.ok || !json?.data) throw new Error(json?.error ?? "Falha ao falar com o Sympla");
-  return json.data;
-}
-
-function toDrafts(participants: SymplaParticipant[]): AttendeeDraft[] {
-  const drafts: AttendeeDraft[] = [];
-  for (const p of participants) {
-    const parsed = attendeeSchema.safeParse({
-      name: [p.first_name, p.last_name].filter(Boolean).join(" "),
-      email: p.email ?? "",
-      company: "",
-      ticket: mapTicket(p.ticket_name ?? ""),
-      status: p.checkin?.check_in ? "checkin" : "confirmado",
-    });
-    if (parsed.success) drafts.push(parsed.data);
-  }
-  return drafts;
-}
 
 export function SymplaImportModal({ eventId, eventName, onClose }: {
   eventId: string; eventName: string; onClose: () => void;
@@ -64,7 +21,7 @@ export function SymplaImportModal({ eventId, eventName, onClose }: {
   const connect = async () => {
     const t = token.trim();
     if (t.length < 8) {
-      setError("Cole o token da API do Sympla (Minha conta → Integrações).");
+      setError("Cole o token da API do Sympla (Minha conta > Integrações).");
       return;
     }
     setBusy("connect");
@@ -82,25 +39,25 @@ export function SymplaImportModal({ eventId, eventName, onClose }: {
   };
 
   const importFrom = async (se: SymplaEvent) => {
-    setBusy(String(se.id));
+    const sid = String(se.id);
+    setBusy(sid);
     setError("");
     try {
-      const participants = (await callSympla({
-        resource: "participants",
+      const result = await syncSymplaEvent({
+        eventId,
         token: token.trim(),
-        eventId: String(se.id),
-      })) as SymplaParticipant[];
-      const drafts = toDrafts(participants);
-      if (drafts.length === 0) {
+        symplaEventId: sid,
+        symplaEventName: se.name,
+      });
+      if (result.remote > 0 && result.added + result.updated === 0 && result.invalid === result.remote) {
         setError("Esse evento do Sympla não tem participantes com email válido.");
         return;
       }
-      const { added, skipped } = importAttendees(eventId, drafts);
       toast(
-        added > 0
-          ? `${added} inscrito${added === 1 ? "" : "s"} puxado${added === 1 ? "" : "s"} do Sympla` +
-            (skipped > 0 ? ` · ${skipped} já existia${skipped === 1 ? "" : "m"}` : "")
-          : "Todos os participantes do Sympla já estavam na lista"
+        result.added > 0 || result.updated > 0
+          ? `${result.added} novo${result.added === 1 ? "" : "s"} · ${result.updated} atualizado${result.updated === 1 ? "" : "s"} do Sympla` +
+            (result.invalid > 0 ? ` · ${result.invalid} sem email válido` : "")
+          : "Participantes do Sympla já sincronizados"
       );
       onClose();
     } catch (e) {
@@ -112,13 +69,14 @@ export function SymplaImportModal({ eventId, eventName, onClose }: {
 
   return (
     <Modal
-      title="Puxar inscritos do Sympla"
+      title="Sincronizar inscritos do Sympla"
       onClose={onClose}
       footer={<button className="btn" onClick={onClose}>Fechar</button>}
     >
       <p style={{ fontSize: 13, color: "var(--dim)", marginTop: 0, marginBottom: 16 }}>
         Os participantes do evento escolhido entram como inscritos de <b>{eventName}</b>.
-        Emails repetidos são pulados — dá para rodar de novo para sincronizar.
+        O Nexo usa o identificador do ingresso/participante do Sympla, então compras com o
+        mesmo email contam como participantes diferentes.
       </p>
 
       <Field label="Token da API do Sympla">
@@ -163,7 +121,7 @@ export function SymplaImportModal({ eventId, eventName, onClose }: {
                 onClick={() => importFrom(se)}
                 disabled={busy !== null}
               >
-                {busy === String(se.id) ? "Importando..." : "Importar inscritos"}
+                {busy === String(se.id) ? "Sincronizando..." : "Sincronizar"}
               </button>
             </div>
           ))}
@@ -172,8 +130,8 @@ export function SymplaImportModal({ eventId, eventName, onClose }: {
 
       {!events && (
         <p style={{ fontSize: 12.5, color: "var(--dim)", marginBottom: 0 }}>
-          O token fica salvo neste navegador. Para gerar um: Sympla → Minha conta →{" "}
-          <b>Integrações</b> → API Sympla.
+          O token fica salvo neste navegador. Para gerar um: Sympla &gt; Minha conta &gt;{" "}
+          <b>Integrações</b> &gt; API Sympla.
         </p>
       )}
     </Modal>

@@ -1,36 +1,75 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Nexo App
 
-## Getting Started
+Aplicativo real do **Nexo**, SaaS de gestão de eventos para produtores acompanharem inscrições, checklist, financeiro, equipe e integrações em um único painel.
 
-First, run the development server:
+Este repo é o app Next.js em produção evolutiva. O protótipo/LP fica no repo irmão `guibesxo-source/nexo`.
+
+## Estado atual
+
+- Next.js App Router + TypeScript.
+- UI funcional sobre uma camada local em `@/lib/db`.
+- Persistência local por usuário via `localStorage`.
+- Supabase Auth já integrado para login/cadastro, mas o sync completo dos dados para nuvem ainda é o próximo incremento.
+- Deploy automático na Vercel a partir da branch `main`.
+
+## Principais módulos
+
+- `app/(app)` - rotas autenticadas da área logada.
+- `components/app/views` - telas principais: dashboard, eventos, inscritos, checklist, financeiro, membros, configurações e integrações.
+- `components/app` - componentes de produto e modais de importação/sync.
+- `lib/db` - store local, actions, seletores derivados e seed demo.
+- `lib/validations` - schemas Zod usados nas bordas.
+- `app/api/*` - proxies server-side para APIs externas.
+- `supabase/migrations` - schema inicial planejado para a fase Supabase.
+
+## Integrações
+
+### Sympla
+
+A integração usa a API pública do Sympla via proxy local em `app/api/sympla/route.ts`.
+
+Fluxo atual:
+
+1. O usuário conecta o token do Sympla na tela **APIs & Integrações**.
+2. O Nexo lista eventos do Sympla.
+3. O usuário cria um evento novo no Nexo ou vincula um evento Sympla a um evento existente.
+4. A sincronização importa participantes pelo identificador externo do ingresso/participante, não apenas por email.
+5. O dashboard e a tela de inscritos fazem auto-sync enquanto estiverem abertos.
+
+Essa regra evita o problema de colapsar vários ingressos comprados com o mesmo email em uma única pessoa no dashboard.
+
+### HubSpot
+
+Importa submissões de formulários do portal pessoal do Nexo.
+
+Atenção: **não usar o HubSpot da Prolog**. O Nexo é pessoal e usa o portal pessoal do Guilherme.
+
+### ClickUp
+
+Importa tarefas de uma lista ClickUp para o checklist do evento selecionado.
+
+## Comandos
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm run lint
+npm run build
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Variáveis de ambiente
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Use `.env.example` como base. O arquivo `.env.local` deve ficar fora do Git.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Variáveis sensíveis, como `SUPABASE_SERVICE_ROLE_KEY`, nunca devem ir para o client.
 
-## Learn More
+## Padrões de desenvolvimento
 
-To learn more about Next.js, take a look at the following resources:
+- A UI deve importar dados e mutações apenas de `@/lib/db`.
+- Validações de formulário e route handlers usam Zod.
+- Imports absolutos usam `@/*`.
+- O verde `#00E47C` é o único acento de marca; CTA verde sempre usa texto preto.
+- Antes de alterar APIs do Next.js, consulte a documentação local em `node_modules/next/dist/docs/`, porque esta versão tem mudanças de comportamento.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Deploy
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+O deploy principal roda pela Vercel na branch `main`.

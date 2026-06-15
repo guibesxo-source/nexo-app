@@ -6,6 +6,7 @@ import {
   Avatar, Badge, Empty, Field, Icon, Menu, Modal, PageHead, useToast,
 } from "@/components/app/kit";
 import { ImportAttendeesModal } from "@/components/app/import-attendees";
+import { useSymplaAutoSync } from "@/components/app/sympla-sync";
 import {
   addAttendee,
   ATTENDEE_STATUS_META,
@@ -121,6 +122,7 @@ export function Inscritos() {
   }, []);
 
   const ev = selectedEvent(db);
+  const symplaSync = useSymplaAutoSync(ev?.id ?? null);
   const all = ev ? attendeesOf(db, ev.id).filter((a) => a.status !== "cancelado") : [];
 
   const countOf = (id: string) =>
@@ -178,9 +180,23 @@ export function Inscritos() {
     <div className="view">
       <PageHead
         title="Inscritos"
-        sub={`${ev.name} · ${all.length} participantes · ${countOf("confirmado") + countOf("checkin")} confirmados`}
+        sub={`${ev.name} · ${all.length} participantes · ${countOf("confirmado") + countOf("checkin")} confirmados${symplaSync.link ? ` · Sympla ${symplaSync.busy ? "sincronizando..." : "vinculado"}` : ""}`}
         actions={
           <>
+            {symplaSync.link && (
+              <button
+                className="btn"
+                onClick={async () => {
+                  const result = await symplaSync.syncNow();
+                  if (result) {
+                    toast(`${result.added} novo${result.added === 1 ? "" : "s"} · ${result.updated} atualizado${result.updated === 1 ? "" : "s"} do Sympla`);
+                  }
+                }}
+                disabled={symplaSync.busy}
+              >
+                <Icon name="refresh" size={15} />{symplaSync.busy ? "Sincronizando" : "Sync Sympla"}
+              </button>
+            )}
             <button className="btn" onClick={() => setImporting(true)}>
               <Icon name="upload" size={15} />Importar
             </button>

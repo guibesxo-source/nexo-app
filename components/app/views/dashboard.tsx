@@ -9,6 +9,7 @@ import {
   BarChart, Card, Donut, Empty, Field, Icon, Kpi, Modal, PageHead, useToast,
 } from "@/components/app/kit";
 import { useGo, useUi } from "@/components/app/shell";
+import { useSymplaAutoSync } from "@/components/app/sympla-sync";
 import {
   addCustomMetric,
   addDashboardWidget,
@@ -285,6 +286,7 @@ export function Dashboard({ eventId }: { eventId?: string }) {
   const [overId, setOverId] = useState<string | null>(null);
 
   const ev = eventId ? eventById(db, eventId) : selectedEvent(db);
+  const symplaSync = useSymplaAutoSync(ev?.id ?? null);
 
   if (!ev) {
     return (
@@ -317,6 +319,9 @@ export function Dashboard({ eventId }: { eventId?: string }) {
     { nm: "Checklist de produção", v: checklistPct },
     { nm: "Taxa de confirmação", v: k.confirmRate },
   ];
+  const syncSub = symplaSync.link
+    ? `Sympla ${symplaSync.busy ? "sincronizando..." : symplaSync.link.last_sync_at ? `sincronizado ${relTime(symplaSync.link.last_sync_at)}` : "vinculado"} · ${k.total} inscritos`
+    : `Atualizado agora · ${db.members.length} membros na organização`;
 
   const exportSummary = () => {
     const csv = toCsv(
@@ -465,7 +470,7 @@ export function Dashboard({ eventId }: { eventId?: string }) {
       <PageHead
         eyebrow={ev.name}
         title="Visão geral"
-        sub={editing ? "Arraste para reordenar · use os controles em cada card" : `Atualizado agora · ${db.members.length} membros na organização`}
+        sub={editing ? "Arraste para reordenar · use os controles em cada card" : syncSub}
         actions={
           editing ? (
             <>
@@ -484,6 +489,20 @@ export function Dashboard({ eventId }: { eventId?: string }) {
             </>
           ) : (
             <>
+              {symplaSync.link && (
+                <button
+                  className="btn"
+                  onClick={async () => {
+                    const result = await symplaSync.syncNow();
+                    if (result) {
+                      toast(`${result.added} novo${result.added === 1 ? "" : "s"} · ${result.updated} atualizado${result.updated === 1 ? "" : "s"} do Sympla`);
+                    }
+                  }}
+                  disabled={symplaSync.busy}
+                >
+                  <Icon name="refresh" size={15} />{symplaSync.busy ? "Sincronizando" : "Sync Sympla"}
+                </button>
+              )}
               <button className="btn" onClick={exportSummary}>
                 <Icon name="download" size={15} />Exportar
               </button>
