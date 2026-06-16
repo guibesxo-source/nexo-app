@@ -24,6 +24,20 @@ const str = (v: unknown): string => (v == null ? "" : String(v));
 const strOrNull = (v: unknown): string | null => (v == null ? null : String(v));
 const num = (v: unknown): number => (v == null ? 0 : Number(v));
 
+function leadFields(v: unknown): Attendee["lead_fields"] {
+  if (!Array.isArray(v)) return [];
+  return v
+    .filter((item): item is Record<string, unknown> => !!item && typeof item === "object")
+    .map((item) => ({
+      key: str(item.key),
+      label: str(item.label),
+      value: str(item.value),
+      source: (item.source as NonNullable<Attendee["lead_fields"]>[number]["source"]) ?? null,
+      group: (item.group as NonNullable<Attendee["lead_fields"]>[number]["group"]) ?? null,
+    }))
+    .filter((item) => item.key && item.label && item.value);
+}
+
 /* ---------- Members ---------- */
 
 export function rowToMember(r: Row): Member {
@@ -102,6 +116,7 @@ export function rowToAttendee(r: Row): Attendee {
     status: r.status as Attendee["status"],
     external_source: (r.external_source as Attendee["external_source"]) ?? null,
     external_id: strOrNull(r.external_id),
+    lead_fields: leadFields(r.lead_fields),
     created_at: str(r.created_at),
   };
 }

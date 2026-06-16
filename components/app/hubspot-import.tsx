@@ -38,6 +38,12 @@ async function callHubspot(body: Record<string, string>): Promise<unknown[]> {
 }
 
 /** Submissão do form → inscrito: casa os campos pelo nome interno do HubSpot. */
+function submittedAtIso(value: unknown): string | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  const d = new Date(value < 10000000000 ? value * 1000 : value);
+  return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
+}
+
 function toDrafts(submissions: HubspotSubmission[]): AttendeeDraft[] {
   const drafts: AttendeeDraft[] = [];
   for (const s of submissions) {
@@ -52,9 +58,9 @@ function toDrafts(submissions: HubspotSubmission[]): AttendeeDraft[] {
       email: v.get("email") ?? "",
       company: v.get("company") ?? "",
       ticket: mapTicket(v.get("ticket") ?? v.get("ingresso") ?? ""),
-      status: "confirmado",
+      status: "pendente",
     });
-    if (parsed.success) drafts.push(parsed.data);
+    if (parsed.success) drafts.push({ ...parsed.data, created_at: submittedAtIso(s.submittedAt) });
   }
   return drafts;
 }

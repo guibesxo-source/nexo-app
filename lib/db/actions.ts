@@ -5,6 +5,7 @@
 import type {
   Attendee,
   AttendeeStatus,
+  AppSettings,
   ChecklistTemplate,
   ChecklistTemplateItem,
   CustomMetric,
@@ -138,7 +139,14 @@ export function updateEvent(id: string, patch: Partial<EventDraft>) {
 
 export function deleteEvent(id: string) {
   let selected: string | null = null;
+  let leadSettingsChanged = false;
   mutate((s) => {
+    const removedAttendeeIds = s.attendees.filter((a) => a.event_id === id).map((a) => a.id);
+    const leadStore = removeLeadFieldStoreEntries(
+      s.settings.attendee_lead_fields,
+      removedAttendeeIds
+    );
+    leadSettingsChanged = leadStore.changed;
     const events = s.events.filter((e) => e.id !== id);
     selected =
       s.session.selected_event_id === id
@@ -151,9 +159,13 @@ export function deleteEvent(id: string) {
       tasks: s.tasks.filter((t) => t.event_id !== id),
       transactions: s.transactions.filter((t) => t.event_id !== id),
       session: { ...s.session, selected_event_id: selected },
+      settings: leadStore.changed
+        ? { ...s.settings, attendee_lead_fields: leadStore.value }
+        : s.settings,
     };
   });
   saveSelectedEvent(selected);
+  if (leadSettingsChanged) saveSettings();
   // FK on delete cascade derruba attendees/tasks/transactions/anexos no banco.
   if (ws()) sbDelete("events", id);
 }
@@ -165,6 +177,8 @@ export type AttendeeDraft = Pick<Attendee, "name" | "email" | "company"> & {
   status: AttendeeStatus;
   external_source?: Attendee["external_source"];
   external_id?: string | null;
+  lead_fields?: Attendee["lead_fields"];
+  created_at?: string;
 };
 
 export type AttendeeImportResult = {
@@ -173,9 +187,13 @@ export type AttendeeImportResult = {
   updated: number;
 };
 
+function importedDraft(draft: AttendeeDraft): AttendeeDraft {
+  return { ...draft, status: "pendente" };
+}
+
 export function addAttendee(eventId: string, draft: AttendeeDraft): string {
   const id = newId();
-  const attendee: Attendee = { ...draft, id, event_id: eventId, created_at: now() };
+  const attendee: Attendee = { ...draft, id, event_id: eventId, created_at: draft.created_at ?? now() };
   mutate((s) => ({ ...s, attendees: [attendee, ...s.attendees] }));
   const w = ws();
   if (w) sbInsert("attendees", attendeeToRow(w, attendee));
@@ -208,22 +226,34 @@ export function importAttendees(
   let added = 0;
   let skipped = 0;
   const fresh: Attendee[] = [];
+  let leadSettingsChanged = false;
   mutate((s) => {
     const seen = new Set(
       s.attendees.filter((a) => a.event_id === eventId).map((a) => a.email.toLowerCase())
     );
     for (const d of drafts) {
-      const key = d.email.trim().toLowerCase();
+      const draft = importedDraft(d);
+      const key = draft.email.trim().toLowerCase();
       if (!key || seen.has(key)) {
         skipped++;
         continue;
       }
       seen.add(key);
-      fresh.push({ ...d, id: newId(), event_id: eventId, created_at: now() });
+      fresh.push({ ...draft, id: newId(), event_id: eventId, created_at: draft.created_at ?? now() });
       added++;
     }
-    return fresh.length ? { ...s, attendees: [...fresh, ...s.attendees] } : s;
+    if (!fresh.length) return s;
+    const leadStore = updateLeadFieldStore(s.settings.attendee_lead_fields, fresh);
+    leadSettingsChanged = leadStore.changed;
+    return {
+      ...s,
+      attendees: [...fresh, ...s.attendees],
+      settings: leadStore.changed
+        ? { ...s.settings, attendee_lead_fields: leadStore.value }
+        : s.settings,
+    };
   });
+  if (leadSettingsChanged) saveSettings();
   const w = ws();
   if (w && fresh.length) sbInsert("attendees", fresh.map((a) => attendeeToRow(w, a)));
   if (added > 0) {
@@ -237,6 +267,45 @@ const externalKey = (a: Pick<AttendeeDraft, "external_source" | "external_id">) 
 
 const emailKey = (email: string) => email.trim().toLowerCase();
 
+function updateLeadFieldStore(
+  current: AppSettings["attendee_lead_fields"],
+  attendees: Attendee[]
+): { value: AppSettings["attendee_lead_fields"]; changed: boolean } {
+  const next = { ...(current ?? {}) };
+  let changed = false;
+
+  for (const attendee of attendees) {
+    const fields = (attendee.lead_fields ?? []).filter((field) => field.label && field.value);
+    if (fields.length > 0) {
+      if (JSON.stringify(next[attendee.id] ?? []) !== JSON.stringify(fields)) {
+        next[attendee.id] = fields;
+        changed = true;
+      }
+    } else if (next[attendee.id]) {
+      delete next[attendee.id];
+      changed = true;
+    }
+  }
+
+  return { value: next, changed };
+}
+
+function removeLeadFieldStoreEntries(
+  current: AppSettings["attendee_lead_fields"],
+  ids: string[]
+): { value: AppSettings["attendee_lead_fields"]; changed: boolean } {
+  if (!current) return { value: current, changed: false };
+  const next = { ...current };
+  let changed = false;
+  for (const id of ids) {
+    if (next[id]) {
+      delete next[id];
+      changed = true;
+    }
+  }
+  return { value: next, changed };
+}
+
 function sameAttendeeData(a: Attendee, d: AttendeeDraft): boolean {
   return (
     a.name === d.name &&
@@ -245,7 +314,9 @@ function sameAttendeeData(a: Attendee, d: AttendeeDraft): boolean {
     a.ticket === d.ticket &&
     a.status === d.status &&
     (a.external_source ?? null) === (d.external_source ?? null) &&
-    (a.external_id ?? null) === (d.external_id ?? null)
+    (a.external_id ?? null) === (d.external_id ?? null) &&
+    JSON.stringify(a.lead_fields ?? []) === JSON.stringify(d.lead_fields ?? []) &&
+    (d.created_at === undefined || a.created_at === d.created_at)
   );
 }
 
@@ -262,6 +333,7 @@ export function syncAttendees(eventId: string, drafts: AttendeeDraft[]): Attende
   let added = 0;
   let skipped = 0;
   let updated = 0;
+  let leadSettingsChanged = false;
   const freshList: Attendee[] = [];
   const updatedList: Attendee[] = [];
 
@@ -285,7 +357,12 @@ export function syncAttendees(eventId: string, drafts: AttendeeDraft[]): Attende
     const replace = (id: string, draft: AttendeeDraft) => {
       const idx = next.findIndex((a) => a.id === id);
       if (idx === -1) return;
-      const patched: Attendee = { ...next[idx], ...draft };
+      const patched: Attendee = {
+        ...next[idx],
+        ...draft,
+        status: next[idx].status,
+        created_at: draft.created_at ?? next[idx].created_at,
+      };
       if (sameAttendeeData(next[idx], patched)) {
         skipped++;
         return;
@@ -296,11 +373,12 @@ export function syncAttendees(eventId: string, drafts: AttendeeDraft[]): Attende
     };
 
     for (const d of drafts) {
-      const xk = externalKey(d);
-      const ek = emailKey(d.email);
+      const draft = importedDraft(d);
+      const xk = externalKey(draft);
+      const ek = emailKey(draft.email);
       const byX = xk ? byExternal.get(xk) : undefined;
       if (byX) {
-        replace(byX.id, d);
+        replace(byX.id, draft);
         continue;
       }
 
@@ -308,7 +386,7 @@ export function syncAttendees(eventId: string, drafts: AttendeeDraft[]): Attende
       if (xk && legacy) {
         consumedLegacy.add(legacy.id);
         byExternal.set(xk, legacy);
-        replace(legacy.id, d);
+        replace(legacy.id, draft);
         continue;
       }
 
@@ -317,14 +395,28 @@ export function syncAttendees(eventId: string, drafts: AttendeeDraft[]): Attende
         continue;
       }
 
-      const fresh: Attendee = { ...d, id: newId(), event_id: eventId, created_at: now() };
+      const fresh: Attendee = { ...draft, id: newId(), event_id: eventId, created_at: draft.created_at ?? now() };
       freshList.push(fresh);
       next.unshift(fresh);
       added++;
     }
 
-    return freshList.length || updated > 0 ? { ...s, attendees: next } : s;
+    if (!freshList.length && updated === 0) return s;
+    const leadStore = updateLeadFieldStore(
+      s.settings.attendee_lead_fields,
+      [...freshList, ...updatedList]
+    );
+    leadSettingsChanged = leadStore.changed;
+
+    return {
+      ...s,
+      attendees: next,
+      settings: leadStore.changed
+        ? { ...s.settings, attendee_lead_fields: leadStore.value }
+        : s.settings,
+    };
   });
+  if (leadSettingsChanged) saveSettings();
 
   const w = ws();
   if (w) {
@@ -343,7 +435,19 @@ export function syncAttendees(eventId: string, drafts: AttendeeDraft[]): Attende
 }
 
 export function removeAttendee(id: string) {
-  mutate((s) => ({ ...s, attendees: s.attendees.filter((a) => a.id !== id) }));
+  let leadSettingsChanged = false;
+  mutate((s) => {
+    const leadStore = removeLeadFieldStoreEntries(s.settings.attendee_lead_fields, [id]);
+    leadSettingsChanged = leadStore.changed;
+    return {
+      ...s,
+      attendees: s.attendees.filter((a) => a.id !== id),
+      settings: leadStore.changed
+        ? { ...s.settings, attendee_lead_fields: leadStore.value }
+        : s.settings,
+    };
+  });
+  if (leadSettingsChanged) saveSettings();
   if (ws()) sbDelete("attendees", id);
 }
 
@@ -927,6 +1031,20 @@ export function pushRecentSearch(term: string) {
 
 export function clearRecentSearches() {
   mutate((s) => ({ ...s, settings: { ...s.settings, recent_searches: [] } }));
+  saveSettings();
+}
+
+/* ---------- Notas do calendário (por dia) ---------- */
+
+/** Define (ou remove, se vazia) a nota de um dia. `date` no formato YYYY-MM-DD. */
+export function setDayNote(date: string, text: string) {
+  const clean = text.trim();
+  mutate((s) => {
+    const notes = { ...(s.settings.day_notes ?? {}) };
+    if (clean) notes[date] = clean;
+    else delete notes[date];
+    return { ...s, settings: { ...s.settings, day_notes: notes } };
+  });
   saveSettings();
 }
 

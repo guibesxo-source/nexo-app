@@ -29,6 +29,14 @@ export type EventFormat = "online" | "presencial" | "hibrido";
 
 export type EventPriority = "alta" | "media" | "baixa";
 
+export type LeadField = {
+  key: string;
+  label: string;
+  value: string;
+  source?: "sympla" | "hubspot" | "csv" | "manual" | null;
+  group?: "lead" | "ticket" | "order" | "custom" | null;
+};
+
 export type Workspace = {
   id: string;
   name: string;
@@ -73,6 +81,8 @@ export type Attendee = {
   external_source?: "sympla" | "hubspot" | "csv" | null;
   /** ID estavel na origem externa (ex.: ingresso/participante do Sympla). */
   external_id?: string | null;
+  /** Campos extras do lead vindos de formularios/integracoes. */
+  lead_fields?: LeadField[];
   created_at: string;
 };
 
@@ -205,6 +215,8 @@ export type SymplaEventLink = {
   last_remote_count?: number;
   last_imported_count?: number;
   last_invalid_count?: number;
+  /** Campos extras escolhidos pelo usuario para sincronizar deste evento. */
+  field_keys?: string[];
 };
 
 export type AppSettings = {
@@ -221,8 +233,12 @@ export type AppSettings = {
   sidebar_collapsed?: boolean;
   /** Layout do dashboard; ausente/null = usa o DEFAULT_DASHBOARD. */
   dashboard?: DashboardConfig | null;
+  /** Fallback temporario para campos extras de inscritos enquanto a coluna jsonb nao existe no banco atual. */
+  attendee_lead_fields?: Record<string, LeadField[]>;
   /** Últimas buscas do overlay de busca global (mais recente primeiro). */
   recent_searches?: string[];
+  /** Notas do usuário por dia no calendário (chave = "YYYY-MM-DD"). */
+  day_notes?: Record<string, string>;
 };
 
 export type Session = {

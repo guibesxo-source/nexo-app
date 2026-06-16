@@ -86,6 +86,7 @@ create table attendees (
   status attendee_status not null default 'pendente',
   external_source text,        -- 'sympla' | 'hubspot' | 'csv' | null
   external_id text,            -- id estável na origem externa
+  lead_fields jsonb not null default '[]'::jsonb, -- campos extras do lead/importacao
   created_at timestamptz default now()
 );
 

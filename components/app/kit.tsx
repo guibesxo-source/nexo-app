@@ -59,6 +59,8 @@ export const I: Record<string, string> = {
   grip: "M9 5h.01M9 12h.01M9 19h.01M15 5h.01M15 12h.01M15 19h.01",
   camera: "M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2zM12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z",
   refresh: "M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5",
+  calendarDays: "M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01",
+  note: "M16 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h9l6-6V5a2 2 0 0 0-2-2zM14 21v-5a2 2 0 0 1 2-2h5",
 };
 
 export function Icon({ name, size }: { name: string; size?: number }) {
@@ -167,20 +169,25 @@ export function PageHead({ eyebrow, title, sub, actions }: {
 }
 
 /* ---------- Card ---------- */
-export function Card({ title, link, onLink, children, pad0, style }: {
+export function Card({ title, link, onLink, actions, children, pad0, style }: {
   title?: ReactNode; link?: string; onLink?: () => void; children?: ReactNode;
-  pad0?: boolean; style?: CSSProperties;
+  actions?: ReactNode; pad0?: boolean; style?: CSSProperties;
 }) {
   return (
     <div className={"card" + (pad0 ? " card-pad-0" : "")} style={style}>
-      {(title || link) && (
+      {(title || link || actions) && (
         <div className="card-head" style={pad0 ? { padding: "18px 20px 0" } : undefined}>
           <div className="card-title">{title}</div>
-          {link && (
-            <a className="card-link" onClick={onLink}>
-              {link}
-              <Icon name="chevRight" size={13} />
-            </a>
+          {(actions || link) && (
+            <div className="card-head-actions">
+              {actions}
+              {link && (
+                <a className="card-link" onClick={onLink}>
+                  {link}
+                  <Icon name="chevRight" size={13} />
+                </a>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -221,11 +228,17 @@ export function BarChart({ data, lastAlt }: { data: { l: string; v: number }[]; 
     <div className="bars">
       {data.map((d, i) => (
         <div className="col" key={i}>
-          <div
-            className={"b" + (lastAlt && i === data.length - 1 ? " alt" : "")}
-            style={{ height: (d.v / max) * 100 + "%" }}
-          >
-            <span className="bval">{d.v}</span>
+          <div className="b-track">
+            <div
+              className={
+                "b" +
+                (lastAlt && i === data.length - 1 ? " alt" : "") +
+                (d.v === 0 ? " zero" : "")
+              }
+              style={{ height: d.v === 0 ? 0 : (d.v / max) * 100 + "%" }}
+            >
+              <span className="bval">{d.v}</span>
+            </div>
           </div>
           <div className="cl">{d.l}</div>
         </div>

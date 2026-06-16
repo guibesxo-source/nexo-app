@@ -30,23 +30,31 @@ export async function callSympla(body: Record<string, string>): Promise<unknown[
   return json.data;
 }
 
-export async function syncSymplaEvent({
-  eventId,
-  symplaEventId,
-  symplaEventName,
-  token,
-}: {
-  eventId: string;
-  symplaEventId: string;
-  symplaEventName?: string;
-  token: string;
-}): Promise<SymplaSyncResult> {
-  const participants = (await callSympla({
+export async function loadSymplaParticipants(
+  token: string,
+  symplaEventId: string
+): Promise<SymplaParticipant[]> {
+  return (await callSympla({
     resource: "participants",
     token,
     eventId: symplaEventId,
   })) as SymplaParticipant[];
-  const { drafts, invalid } = symplaParticipantsToDrafts(participants, symplaEventId);
+}
+
+export function syncSymplaParticipants({
+  eventId,
+  symplaEventId,
+  symplaEventName,
+  participants,
+  fieldKeys,
+}: {
+  eventId: string;
+  symplaEventId: string;
+  symplaEventName?: string;
+  participants: SymplaParticipant[];
+  fieldKeys?: string[];
+}): Promise<SymplaSyncResult> {
+  const { drafts, invalid } = symplaParticipantsToDrafts(participants, symplaEventId, fieldKeys);
   const result = syncAttendees(eventId, drafts);
 
   setSymplaEventLink(eventId, {
@@ -56,9 +64,33 @@ export async function syncSymplaEvent({
     last_remote_count: participants.length,
     last_imported_count: drafts.length,
     last_invalid_count: invalid,
+    field_keys: fieldKeys,
   });
 
-  return { ...result, remote: participants.length, invalid };
+  return Promise.resolve({ ...result, remote: participants.length, invalid });
+}
+
+export async function syncSymplaEvent({
+  eventId,
+  symplaEventId,
+  symplaEventName,
+  token,
+  fieldKeys,
+}: {
+  eventId: string;
+  symplaEventId: string;
+  symplaEventName?: string;
+  token: string;
+  fieldKeys?: string[];
+}): Promise<SymplaSyncResult> {
+  const participants = await loadSymplaParticipants(token, symplaEventId);
+  return syncSymplaParticipants({
+    eventId,
+    symplaEventId,
+    symplaEventName,
+    participants,
+    fieldKeys,
+  });
 }
 
 export function useSymplaAutoSync(eventId: string | null, intervalMs = 60000) {
@@ -67,6 +99,7 @@ export function useSymplaAutoSync(eventId: string | null, intervalMs = 60000) {
   const link = eventId ? db.settings.sympla_event_links?.[eventId] : undefined;
   const linkEventId = link?.sympla_event_id;
   const linkEventName = link?.sympla_event_name;
+  const linkFieldKeys = link?.field_keys;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [lastResult, setLastResult] = useState<SymplaSyncResult | null>(null);
@@ -81,6 +114,7 @@ export function useSymplaAutoSync(eventId: string | null, intervalMs = 60000) {
         token,
         symplaEventId: linkEventId,
         symplaEventName: linkEventName,
+        fieldKeys: linkFieldKeys,
       });
       setLastResult(result);
       return result;
@@ -91,7 +125,7 @@ export function useSymplaAutoSync(eventId: string | null, intervalMs = 60000) {
     } finally {
       setBusy(false);
     }
-  }, [eventId, linkEventId, linkEventName, token]);
+  }, [eventId, linkEventId, linkEventName, linkFieldKeys, token]);
 
   useEffect(() => {
     if (!eventId || !token || !linkEventId) return;

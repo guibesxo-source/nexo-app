@@ -7,6 +7,40 @@ import { symplaRequestSchema } from "@/lib/validations/sympla";
 
 const BASE = "https://api.sympla.com.br/public/v3";
 
+const PARTICIPANT_FIELDS = [
+  "id",
+  "event_id",
+  "order_id",
+  "order_status",
+  "order_date",
+  "order_updated_date",
+  "order_approved_date",
+  "order_discount",
+  "first_name",
+  "last_name",
+  "full_name",
+  "name",
+  "email",
+  "participant_email",
+  "buyer_email",
+  "company",
+  "organization",
+  "ticket_id",
+  "ticket_number",
+  "ticket_num",
+  "ticket_num_qr_code",
+  "ticket_created_at",
+  "ticket_updated_at",
+  "ticket_name",
+  "sector_name",
+  "marked_place_name",
+  "access_information",
+  "ticket_sale_price",
+  "status",
+  "checkin",
+  "custom_form",
+].join(",");
+
 type SymplaPage = {
   data?: unknown[];
   pagination?: { has_next?: boolean };
@@ -15,7 +49,10 @@ type SymplaPage = {
 async function fetchAllPages(url: string, token: string, maxPages: number): Promise<unknown[]> {
   const all: unknown[] = [];
   for (let page = 1; page <= maxPages; page++) {
-    const res = await fetch(`${url}?page_size=100&page=${page}`, {
+    const nextUrl = new URL(url);
+    nextUrl.searchParams.set("page_size", "100");
+    nextUrl.searchParams.set("page", String(page));
+    const res = await fetch(nextUrl, {
       headers: { s_token: token },
       cache: "no-store",
     });
@@ -43,9 +80,9 @@ export async function POST(request: Request) {
       parsed.data.resource === "events"
         ? await fetchAllPages(`${BASE}/events`, token, 3)
         : await fetchAllPages(
-            `${BASE}/events/${encodeURIComponent(parsed.data.eventId)}/participants`,
+            `${BASE}/events/${encodeURIComponent(parsed.data.eventId)}/participants?fields=${encodeURIComponent(PARTICIPANT_FIELDS)}&field_sort=order_date&sort=DESC&timezone=America%2FSao_Paulo`,
             token,
-            30
+            100
           );
     return NextResponse.json({ data });
   } catch (err) {

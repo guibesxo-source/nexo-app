@@ -48,6 +48,7 @@ function evInitials(name: string): string {
 export const ROUTES: Record<string, string> = {
   dashboard: "/dashboard",
   eventos: "/events",
+  calendario: "/calendario",
   inscritos: "/inscritos",
   financeiro: "/financeiro",
   checklist: "/checklist",
@@ -57,9 +58,9 @@ export const ROUTES: Record<string, string> = {
 };
 
 const CRUMBS: Record<string, string> = {
-  dashboard: "Dashboard", eventos: "Eventos", inscritos: "Inscritos",
-  financeiro: "Financeiro", checklist: "Checklist", membros: "Membros",
-  integracoes: "APIs & Integrações", config: "Configurações",
+  dashboard: "Dashboard", eventos: "Eventos", calendario: "Calendário",
+  inscritos: "Inscritos", financeiro: "Financeiro", checklist: "Checklist",
+  membros: "Membros", integracoes: "APIs & Integrações", config: "Configurações",
 };
 
 function routeIdFromPath(pathname: string): string {
@@ -150,6 +151,7 @@ function Sidebar({ active, onNav, open, collapsed, onToggleCollapse }: {
   const nav = [
     { id: "dashboard", label: "Dashboard", icon: "grid", count: 0, warn: false },
     { id: "eventos", label: "Eventos", icon: "calendar", count: counts.events, warn: false },
+    { id: "calendario", label: "Calendário", icon: "calendarDays", count: 0, warn: false },
     { id: "inscritos", label: "Inscritos", icon: "users", count: counts.attendees, warn: false },
     { id: "financeiro", label: "Financeiro", icon: "wallet", count: 0, warn: false },
     {
@@ -260,6 +262,8 @@ function SearchOverlay({ onClose }: { onClose: () => void }) {
   }, [onClose]);
 
   const qq = q.trim().toLowerCase();
+  const leadText = (a: { lead_fields?: { label: string; value: string }[] }) =>
+    (a.lead_fields ?? []).map((field) => `${field.label} ${field.value}`).join(" ");
   const events = qq
     ? db.events.filter((e) => (e.name + " " + e.location).toLowerCase().includes(qq)).slice(0, 3)
     : [];
@@ -268,7 +272,7 @@ function SearchOverlay({ onClose }: { onClose: () => void }) {
         .filter(
           (a) =>
             a.status !== "cancelado" &&
-            (a.name + " " + a.email + " " + a.company).toLowerCase().includes(qq)
+            (a.name + " " + a.email + " " + a.company + " " + leadText(a)).toLowerCase().includes(qq)
         )
         .slice(0, 6)
     : [];

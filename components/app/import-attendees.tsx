@@ -34,9 +34,34 @@ const HEADER_KEYS: Record<string, string[]> = {
   company: ["empresa", "company", "organizacao"],
   ticket: ["ingresso", "tipo de ingresso", "ticket"],
   status: ["status", "situacao"],
+  created_at: ["inscrito em", "data de inscricao", "data da inscricao", "created_at"],
 };
 
 type Parsed = { fileName: string; drafts: AttendeeDraft[]; invalid: number };
+
+function parseCsvDate(value: string): string | undefined {
+  const raw = value.trim();
+  if (!raw) return undefined;
+  if (/^\d{10,13}$/.test(raw)) {
+    const n = Number(raw);
+    const d = new Date(raw.length === 10 ? n * 1000 : n);
+    return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
+  }
+  const br = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (br) {
+    const [, day, month, year, hour = "0", minute = "0", second = "0"] = br;
+    const d = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second));
+    return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
+  }
+  const isoLocal = raw.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (isoLocal) {
+    const [, year, month, day, hour = "0", minute = "0", second = "0"] = isoLocal;
+    const d = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second));
+    return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
+  }
+  const d = new Date(raw.includes("T") ? raw : raw.replace(" ", "T"));
+  return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
+}
 
 function rowsToDrafts(rows: string[][]): { drafts: AttendeeDraft[]; invalid: number } {
   if (rows.length === 0) return { drafts: [], invalid: 0 };
@@ -56,6 +81,7 @@ function rowsToDrafts(rows: string[][]): { drafts: AttendeeDraft[]; invalid: num
     company: col("company", 2),
     ticket: col("ticket", 3),
     status: col("status", 4),
+    created_at: col("created_at", 5),
   };
 
   const drafts: AttendeeDraft[] = [];
@@ -68,7 +94,7 @@ function rowsToDrafts(rows: string[][]): { drafts: AttendeeDraft[]; invalid: num
       ticket: mapTicket(row[ix.ticket] ?? ""),
       status: mapStatus(row[ix.status] ?? ""),
     });
-    if (parsed.success) drafts.push(parsed.data);
+    if (parsed.success) drafts.push({ ...parsed.data, created_at: parseCsvDate(row[ix.created_at] ?? "") });
     else invalid++;
   }
   return { drafts, invalid };

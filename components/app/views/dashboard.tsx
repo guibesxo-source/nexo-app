@@ -4,7 +4,7 @@
    o usuário adiciona/remove/reordena/redimensiona; KPIs do catálogo + métricas
    personalizadas + blocos (gráficos e listas). O layout vive em
    settings.dashboard (cai no DEFAULT_DASHBOARD quando vazio). */
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   BarChart, Card, Donut, Empty, Field, Icon, Kpi, Modal, PageHead, useToast,
 } from "@/components/app/kit";
@@ -26,9 +26,9 @@ import {
   reorderDashboard,
   resetDashboard,
   selectedEvent,
+  signupsByDate,
   updateDashboardWidget,
   useDb,
-  weeklySignups,
   type EventKpis,
 } from "@/lib/db";
 import { downloadCsv, toCsv } from "@/lib/csv";
@@ -44,7 +44,7 @@ import type {
 /* ---------- catálogos auxiliares ---------- */
 
 const BLOCKS: { type: DashboardWidgetType; label: string; icon: string; desc: string }[] = [
-  { type: "chart-signups", label: "Inscritos por semana", icon: "trending", desc: "Gráfico de novas inscrições" },
+  { type: "chart-signups", label: "Inscritos por data", icon: "trending", desc: "Gráfico de novas inscrições" },
   { type: "chart-confirm", label: "Confirmação", icon: "users", desc: "Donut de confirmados x pendentes" },
   { type: "chart-category", label: "Gastos por categoria", icon: "wallet", desc: "Ranking de despesas do evento" },
   { type: "list-activity", label: "Atividade recente", icon: "bell", desc: "Últimas ações do workspace" },
@@ -72,6 +72,74 @@ const FILTERS: Record<CustomMetricSource, { v: string; l: string }[]> = {
 };
 
 const defaultFilter = (s: CustomMetricSource) => (s === "checklist" ? "todas" : "todos");
+
+const dateOnly = (date: Date) =>
+  [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
+
+function dashboardColumns(width: number): number {
+  if (width < 620) return 1;
+  if (width < 900) return 2;
+  if (width < 1180) return 3;
+  return 4;
+}
+
+function defaultWidgetSpan(type: DashboardWidgetType): number {
+  if (type === "kpi") return 1;
+  if (type === "chart-confirm") return 1;
+  if (type === "chart-signups") return 3;
+  return 2;
+}
+
+function baseWidgetSpan(w: DashboardWidget, cols: number, editing: boolean): number {
+  const configured = Math.min(cols, Math.max(1, w.span ?? defaultWidgetSpan(w.type)));
+  if (editing) return configured;
+  if (cols >= 4 && w.type === "chart-confirm" && configured <= 2) return 1;
+  if (cols >= 4 && w.type === "chart-signups" && configured <= 2) return 2;
+  return configured;
+}
+
+function canGrowWidget(w: DashboardWidget): boolean {
+  return w.type !== "kpi" && w.type !== "chart-confirm";
+}
+
+function layoutWidgets(widgets: DashboardWidget[], cols: number, editing: boolean) {
+  const out: { widget: DashboardWidget; span: number }[] = [];
+  let row: { widget: DashboardWidget; span: number }[] = [];
+  let used = 0;
+
+  const flush = () => {
+    if (!row.length) return;
+    let remaining = cols - row.reduce((sum, item) => sum + item.span, 0);
+    while (!editing && remaining > 0) {
+      let changed = false;
+      for (const item of row) {
+        const growable = canGrowWidget(item.widget) || row.length === 1;
+        if (!growable || item.span >= cols || remaining <= 0) continue;
+        item.span += 1;
+        remaining -= 1;
+        changed = true;
+      }
+      if (!changed) break;
+    }
+    out.push(...row);
+    row = [];
+    used = 0;
+  };
+
+  for (const widget of widgets) {
+    const span = baseWidgetSpan(widget, cols, editing);
+    if (row.length && used + span > cols) flush();
+    row.push({ widget, span });
+    used += span;
+    if (used >= cols) flush();
+  }
+  flush();
+  return out;
+}
 
 /** Move dragId para a posição de overId, devolvendo a nova ordem de ids. */
 function reorderIds(ids: string[], dragId: string, overId: string): string[] {
@@ -280,13 +348,37 @@ export function Dashboard({ eventId }: { eventId?: string }) {
   const go = useGo();
   const toast = useToast();
   const { openNewEvent } = useUi();
+  const dashboardRef = useRef<HTMLDivElement>(null);
   const [editing, setEditing] = useState(false);
   const [adding, setAdding] = useState(false);
   const [dragId, setDragId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
+  const [signupFrom, setSignupFrom] = useState("");
+  const [signupTo, setSignupTo] = useState("");
+  const [signupPickerOpen, setSignupPickerOpen] = useState(false);
+  const [cols, setCols] = useState(4);
 
   const ev = eventId ? eventById(db, eventId) : selectedEvent(db);
   const symplaSync = useSymplaAutoSync(ev?.id ?? null);
+  const cfg = dashboardConfig(db);
+  const responsiveWidgets = useMemo(
+    () => layoutWidgets(cfg.widgets, cols, editing),
+    [cfg.widgets, cols, editing]
+  );
+
+  useEffect(() => {
+    const el = dashboardRef.current;
+    if (!el) return;
+    const update = () => setCols(dashboardColumns(el.clientWidth));
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    window.addEventListener("resize", update);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, [ev?.id]);
 
   if (!ev) {
     return (
@@ -306,9 +398,16 @@ export function Dashboard({ eventId }: { eventId?: string }) {
     );
   }
 
-  const cfg = dashboardConfig(db);
   const k = eventKpis(db, ev.id);
-  const weeks = weeklySignups(db, ev.id);
+  const signups = signupsByDate(db, ev.id, {
+    from: signupFrom || undefined,
+    to: signupTo || undefined,
+    days: 14,
+  });
+  const today = dateOnly(new Date());
+  const signupToday = signupsByDate(db, ev.id, { from: today, to: today }).reduce((sum, item) => sum + item.v, 0);
+  const signupTotal = signups.reduce((sum, item) => sum + item.v, 0);
+  const hasSignupFilter = !!signupFrom || !!signupTo;
   const cats = categoryTotals(db, ev.id);
   const days = daysUntil(ev.starts_at);
   const checklistPct = k.tasksTotal ? Math.round((k.tasksDone / k.tasksTotal) * 100) : 0;
@@ -376,8 +475,76 @@ export function Dashboard({ eventId }: { eventId?: string }) {
       }
       case "chart-signups":
         return (
-          <Card title="Inscritos por semana" link={editing ? undefined : "Ver inscritos"} onLink={() => go("inscritos")}>
-            <BarChart data={weeks} lastAlt />
+          <Card
+            title="Inscritos por data"
+            actions={
+              <div className="dash-calendar-wrap">
+                <button
+                  type="button"
+                  className={"dash-calendar-btn" + (hasSignupFilter ? " active" : "")}
+                  title="Filtrar periodo"
+                  aria-label="Filtrar periodo"
+                  aria-expanded={signupPickerOpen}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSignupPickerOpen((open) => !open);
+                  }}
+                >
+                  <Icon name="calendar" size={15} />
+                </button>
+                {signupPickerOpen && (
+                  <>
+                    <span className="dash-calendar-scrim" onClick={() => setSignupPickerOpen(false)} />
+                    <div className="dash-calendar-pop" onClick={(e) => e.stopPropagation()}>
+                      <label className="dash-date-field">
+                        <span>De</span>
+                        <input
+                          className="input"
+                          type="date"
+                          value={signupFrom}
+                          onChange={(e) => setSignupFrom(e.target.value)}
+                        />
+                      </label>
+                      <label className="dash-date-field">
+                        <span>Ate</span>
+                        <input
+                          className="input"
+                          type="date"
+                          value={signupTo}
+                          onChange={(e) => setSignupTo(e.target.value)}
+                        />
+                      </label>
+                      <div className="dash-calendar-actions">
+                        {hasSignupFilter && (
+                          <button
+                            type="button"
+                            className="btn btn-sm"
+                            onClick={() => {
+                              setSignupFrom("");
+                              setSignupTo("");
+                            }}
+                          >
+                            Limpar
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          onClick={() => setSignupPickerOpen(false)}
+                        >
+                          Aplicar
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            }
+          >
+            <div className="dash-chart-total">
+              <b>{signupToday}</b> hoje · <b>{signupTotal}</b> no periodo
+            </div>
+            <BarChart data={signups} />
           </Card>
         );
       case "chart-confirm":
@@ -529,17 +696,22 @@ export function Dashboard({ eventId }: { eventId?: string }) {
           }
         />
       ) : (
-        <div className={"dash-grid" + (editing ? " editing" : "")}>
-          {cfg.widgets.map((w) => (
+        <div
+          ref={dashboardRef}
+          className={"dash-grid" + (editing ? " editing" : "")}
+          style={{ "--dash-cols": cols } as CSSProperties}
+        >
+          {responsiveWidgets.map(({ widget: w, span }) => (
             <div
               key={w.id}
               className={
                 "dash-widget" +
+                ` dash-type-${w.type} dash-span-${span}` +
                 (editing ? " editing" : "") +
                 (dragId === w.id ? " dragging" : "") +
                 (overId === w.id && dragId && dragId !== w.id ? " drag-over" : "")
               }
-              style={{ gridColumn: `span ${Math.min(4, Math.max(1, w.span ?? 1))}` }}
+              style={{ gridColumn: `span ${span}` }}
               draggable={editing}
               onDragStart={editing ? () => setDragId(w.id) : undefined}
               onDragOver={editing ? (e) => { e.preventDefault(); setOverId(w.id); } : undefined}

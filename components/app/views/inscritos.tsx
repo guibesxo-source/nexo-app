@@ -1,6 +1,6 @@
 "use client";
 
-/* Inscritos — FR-C1..C4: CRUD, status, busca/filtro, import e export CSV. */
+/* Inscritos - CRUD, status, busca/filtro, import e export CSV. */
 import { useEffect, useState } from "react";
 import {
   Avatar, Badge, Empty, Field, Icon, Menu, Modal, PageHead, useToast,
@@ -10,6 +10,7 @@ import { useSymplaAutoSync } from "@/components/app/sympla-sync";
 import {
   addAttendee,
   ATTENDEE_STATUS_META,
+  attendeeSignupAt,
   attendeesOf,
   removeAttendee,
   selectedEvent,
@@ -27,6 +28,30 @@ const TABS: [string, string][] = [
   ["pendente", "Pendentes"],
   ["checkin", "Check-in"],
 ];
+
+type LeadColumn = { key: string; label: string };
+
+function leadFieldsOf(a: Attendee) {
+  return (a.lead_fields ?? []).filter((field) => field.label && field.value);
+}
+
+function leadColumnsOf(attendees: Attendee[]): LeadColumn[] {
+  const byKey = new Map<string, LeadColumn>();
+  for (const attendee of attendees) {
+    for (const field of leadFieldsOf(attendee)) {
+      if (!byKey.has(field.key)) byKey.set(field.key, { key: field.key, label: field.label });
+    }
+  }
+  return [...byKey.values()];
+}
+
+function leadValue(a: Attendee, key: string) {
+  return leadFieldsOf(a).find((field) => field.key === key)?.value ?? "";
+}
+
+function leadSearchText(a: Attendee) {
+  return leadFieldsOf(a).map((field) => `${field.label} ${field.value}`).join(" ");
+}
 
 function AttendeeFormModal({ eventId, onClose }: { eventId: string; onClose: () => void }) {
   const toast = useToast();
@@ -97,11 +122,45 @@ function AttendeeFormModal({ eventId, onClose }: { eventId: string; onClose: () 
   );
 }
 
+function LeadFieldsModal({ attendee, onClose }: { attendee: Attendee; onClose: () => void }) {
+  const fields = leadFieldsOf(attendee);
+  return (
+    <Modal
+      title="Dados do lead"
+      onClose={onClose}
+      width={620}
+      footer={<button className="btn" onClick={onClose}>Fechar</button>}
+    >
+      <div className="lead-detail-head">
+        <Avatar initials={initialsOf(attendee.name)} />
+        <div>
+          <div className="nm">{attendee.name}</div>
+          <div className="em">{attendee.email}</div>
+        </div>
+      </div>
+
+      {fields.length === 0 ? (
+        <Empty icon="users" title="Sem campos extras" sub="Este inscrito ainda nao tem dados adicionais de lead." />
+      ) : (
+        <div className="lead-detail-grid">
+          {fields.map((field) => (
+            <div className="lead-detail-row" key={`${field.key}:${field.label}`}>
+              <div className="lead-detail-label">
+                <span>{field.label}</span>
+                {field.source === "sympla" && <Badge tone="gray">Sympla</Badge>}
+              </div>
+              <div className="lead-detail-value">{field.value}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 export function Inscritos() {
   const db = useDb();
   const toast = useToast();
-  // Busca pode vir da topbar (/inscritos?q=...); a view só monta no client
-  // (AppShell renderiza após a hidratação), então window está disponível.
   const [q, setQ] = useState(() =>
     typeof window === "undefined"
       ? ""
@@ -110,8 +169,8 @@ export function Inscritos() {
   const [tab, setTab] = useState("todos");
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [leadOpen, setLeadOpen] = useState<Attendee | null>(null);
 
-  // Busca global (overlay da topbar) atualiza esta view mesmo já montada.
   useEffect(() => {
     const onSearch = (e: Event) => {
       setQ((e as CustomEvent<string>).detail);
@@ -124,21 +183,24 @@ export function Inscritos() {
   const ev = selectedEvent(db);
   const symplaSync = useSymplaAutoSync(ev?.id ?? null);
   const all = ev ? attendeesOf(db, ev.id).filter((a) => a.status !== "cancelado") : [];
+  const leadColumnCount = leadColumnsOf(all).length;
 
   const countOf = (id: string) =>
     id === "todos" ? all.length : all.filter((a) => a.status === id).length;
 
   const rows = all
     .filter((a) => tab === "todos" || a.status === tab)
-    .filter((a) => !q || (a.name + a.email + a.company).toLowerCase().includes(q.toLowerCase()))
-    .sort((a, b) => b.created_at.localeCompare(a.created_at));
+    .filter((a) => !q || (a.name + a.email + a.company + leadSearchText(a)).toLowerCase().includes(q.toLowerCase()))
+    .sort((a, b) => attendeeSignupAt(b).localeCompare(attendeeSignupAt(a)));
 
   const exportCsv = () => {
+    const leadCols = leadColumnsOf(rows);
     const csv = toCsv(
-      ["Nome", "Email", "Empresa", "Ingresso", "Status", "Inscrito em"],
+      ["Nome", "Email", "Empresa", "Ingresso", "Status", "Inscrito em", ...leadCols.map((field) => field.label)],
       rows.map((a) => [
         a.name, a.email, a.company, a.ticket,
-        ATTENDEE_STATUS_META[a.status].label, fmtDateTime(a.created_at),
+        ATTENDEE_STATUS_META[a.status].label, fmtDateTime(attendeeSignupAt(a)),
+        ...leadCols.map((field) => leadValue(a, field.key)),
       ])
     );
     downloadCsv(`nexo-inscritos-${ev?.name.toLowerCase().replace(/\s+/g, "-") ?? "evento"}.csv`, csv);
@@ -146,6 +208,12 @@ export function Inscritos() {
   };
 
   const statusActions = (a: Attendee) => [
+    ...(leadFieldsOf(a).length > 0
+      ? [{
+          label: "Ver dados do lead",
+          onClick: () => setLeadOpen(a),
+        }]
+      : []),
     ...(["confirmado", "checkin", "pendente"] as AttendeeStatus[])
       .filter((s) => s !== a.status)
       .map((s) => ({
@@ -180,7 +248,7 @@ export function Inscritos() {
     <div className="view">
       <PageHead
         title="Inscritos"
-        sub={`${ev.name} · ${all.length} participantes · ${countOf("confirmado") + countOf("checkin")} confirmados${symplaSync.link ? ` · Sympla ${symplaSync.busy ? "sincronizando..." : "vinculado"}` : ""}`}
+        sub={`${ev.name} · ${all.length} participantes · ${countOf("confirmado") + countOf("checkin")} confirmados${leadColumnCount > 0 ? ` · ${leadColumnCount} campos de lead` : ""}${symplaSync.link ? ` · Sympla ${symplaSync.busy ? "sincronizando..." : "vinculado"}` : ""}`}
         actions={
           <>
             {symplaSync.link && (
@@ -214,7 +282,7 @@ export function Inscritos() {
         <div className="input-search" style={{ maxWidth: 320 }}>
           <Icon name="search" size={16} />
           <input
-            placeholder="Buscar por nome, email ou empresa..."
+            placeholder="Buscar por nome, email, empresa ou lead..."
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
@@ -239,23 +307,25 @@ export function Inscritos() {
               <th>Participante</th>
               <th>Empresa</th>
               <th>Ingresso</th>
+              <th>Lead</th>
               <th>Status</th>
-              <th>Inscrição</th>
+              <th>Inscricao</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={6} style={{ textAlign: "center", padding: 40, color: "var(--dim)" }}>
+                <td colSpan={7} style={{ textAlign: "center", padding: 40, color: "var(--dim)" }}>
                   {all.length === 0
-                    ? "Nenhum inscrito ainda — adicione o primeiro."
+                    ? "Nenhum inscrito ainda - adicione o primeiro."
                     : "Nenhum inscrito encontrado com esses filtros."}
                 </td>
               </tr>
             ) : (
               rows.map((a) => {
                 const meta = ATTENDEE_STATUS_META[a.status];
+                const leadFields = leadFieldsOf(a);
                 return (
                   <tr key={a.id}>
                     <td>
@@ -273,8 +343,25 @@ export function Inscritos() {
                         {a.ticket}
                       </Badge>
                     </td>
+                    <td>
+                      {leadFields.length === 0 ? (
+                        <span style={{ color: "var(--dim)" }}>—</span>
+                      ) : (
+                        <button className="lead-preview" type="button" onClick={() => setLeadOpen(a)}>
+                          {leadFields.slice(0, 2).map((field) => (
+                            <span className="lead-chip" key={field.key}>
+                              <b>{field.label}</b>
+                              <span>{field.value}</span>
+                            </span>
+                          ))}
+                          {leadFields.length > 2 && (
+                            <span className="lead-count">+{leadFields.length - 2}</span>
+                          )}
+                        </button>
+                      )}
+                    </td>
                     <td><Badge tone={meta.tone} dot>{meta.label}</Badge></td>
-                    <td style={{ color: "var(--dim)" }}>{fmtDateTime(a.created_at)}</td>
+                    <td style={{ color: "var(--dim)" }}>{fmtDateTime(attendeeSignupAt(a))}</td>
                     <td><Menu items={statusActions(a)} /></td>
                   </tr>
                 );
@@ -289,6 +376,7 @@ export function Inscritos() {
 
       {adding && <AttendeeFormModal eventId={ev.id} onClose={() => setAdding(false)} />}
       {importing && <ImportAttendeesModal eventId={ev.id} onClose={() => setImporting(false)} />}
+      {leadOpen && <LeadFieldsModal attendee={leadOpen} onClose={() => setLeadOpen(null)} />}
     </div>
   );
 }

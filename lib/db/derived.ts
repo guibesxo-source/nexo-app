@@ -178,21 +178,127 @@ export function eventKpis(s: DbState, eventId: string): EventKpis {
 }
 
 /** Inscritos por semana (últimas `weeks` semanas, FR-F1). */
-export function weeklySignups(s: DbState, eventId: string, weeks = 8): { l: string; v: number }[] {
-  const people = attendeesOf(s, eventId);
-  const msWeek = 7 * 86400000;
-  const end = Date.now();
-  return Array.from({ length: weeks }, (_, i) => {
-    const from = end - (weeks - i) * msWeek;
-    const to = from + msWeek;
+export type DateRange = {
+  from?: string;
+  to?: string;
+  days?: number;
+  weeks?: number;
+};
+
+const dayMs = 86400000;
+const weekMs = 7 * dayMs;
+const signupDateFieldKeys = [
+  "sympla:ticket_created_at",
+  "sympla:ticket_created_date",
+  "sympla:ticket_date",
+  "sympla:registration_date",
+  "sympla:registered_at",
+  "sympla:created_at",
+  "sympla:order_date",
+  "sympla:order.order_date",
+  "sympla:order_approved_date",
+  "sympla:order.approved_date",
+];
+
+function startOfDayMs(dateOnly: string): number | null {
+  const d = new Date(`${dateOnly}T00:00:00`);
+  return Number.isNaN(d.getTime()) ? null : d.getTime();
+}
+
+function endOfDayMs(dateOnly: string): number | null {
+  const d = new Date(`${dateOnly}T23:59:59.999`);
+  return Number.isNaN(d.getTime()) ? null : d.getTime();
+}
+
+function shortDateLabel(ms: number): string {
+  return new Date(ms).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+}
+
+function localDateOnly(ms: number): string {
+  const d = new Date(ms);
+  return [
+    d.getFullYear(),
+    String(d.getMonth() + 1).padStart(2, "0"),
+    String(d.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+function dateTimeMs(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const ms = value < 10000000000 ? value * 1000 : value;
+    return Number.isFinite(ms) ? ms : null;
+  }
+
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  if (/^\d{10,13}$/.test(raw)) {
+    const n = Number(raw);
+    const ms = raw.length === 10 ? n * 1000 : n;
+    return Number.isFinite(ms) ? ms : null;
+  }
+
+  const br = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (br) {
+    const [, day, month, year, hour = "0", minute = "0", second = "0"] = br;
+    const d = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second));
+    return Number.isNaN(d.getTime()) ? null : d.getTime();
+  }
+
+  const isoLocal = raw.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (isoLocal) {
+    const [, year, month, day, hour = "0", minute = "0", second = "0"] = isoLocal;
+    const d = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second));
+    return Number.isNaN(d.getTime()) ? null : d.getTime();
+  }
+
+  const d = new Date(raw.includes("T") ? raw : raw.replace(" ", "T"));
+  return Number.isNaN(d.getTime()) ? null : d.getTime();
+}
+
+function signupTimeMs(a: Attendee): number {
+  for (const key of signupDateFieldKeys) {
+    const field = (a.lead_fields ?? []).find((item) => item.key === key);
+    const ms = dateTimeMs(field?.value);
+    if (ms != null) return ms;
+  }
+
+  return dateTimeMs(a.created_at) ?? 0;
+}
+
+export function attendeeSignupAt(a: Attendee): string {
+  const ms = signupTimeMs(a);
+  return ms ? new Date(ms).toISOString() : a.created_at;
+}
+
+export function signupsByDate(s: DbState, eventId: string, range: DateRange = {}): { l: string; v: number }[] {
+  const people = attendeesOf(s, eventId).filter((a) => a.status !== "cancelado");
+  const todayEnd = endOfDayMs(localDateOnly(Date.now())) ?? Date.now();
+  const explicitFrom = range.from ? startOfDayMs(range.from) : null;
+  const explicitTo = range.to ? endOfDayMs(range.to) : null;
+  const end = explicitTo ?? todayEnd;
+  const days = range.days ?? 14;
+  const start = explicitFrom ?? startOfDayMs(localDateOnly(end - (days - 1) * dayMs)) ?? end;
+  const safeStart = Math.min(start, end);
+  const safeEnd = Math.max(start, end);
+  const span = safeEnd - safeStart;
+  const bucketMs = span <= 21 * dayMs ? dayMs : weekMs;
+  const bucketCount = Math.max(1, Math.ceil((safeEnd - safeStart + 1) / bucketMs));
+
+  return Array.from({ length: bucketCount }, (_, i) => {
+    const from = safeStart + i * bucketMs;
+    const to = i === bucketCount - 1 ? safeEnd + 1 : from + bucketMs;
     return {
-      l: "S" + (i + 1),
+      l: shortDateLabel(from),
       v: people.filter((a) => {
-        const t = new Date(a.created_at).getTime();
+        const t = signupTimeMs(a);
         return t >= from && t < to;
       }).length,
     };
   });
+}
+
+export function weeklySignups(s: DbState, eventId: string, range: DateRange = {}): { l: string; v: number }[] {
+  return signupsByDate(s, eventId, { ...range, days: range.days ?? (range.weeks ?? 8) * 7 });
 }
 
 /** Gasto por categoria (FR-E3), ordenado do maior para o menor. */
@@ -292,8 +398,8 @@ export const DEFAULT_DASHBOARD: DashboardConfig = {
     { id: "w-confirmed", type: "kpi", metric: "confirmed", span: 1 },
     { id: "w-budget", type: "kpi", metric: "budgetPct", span: 1 },
     { id: "w-tasks", type: "kpi", metric: "tasksDone", span: 1 },
-    { id: "w-signups", type: "chart-signups", span: 2 },
-    { id: "w-confirm", type: "chart-confirm", span: 2 },
+    { id: "w-signups", type: "chart-signups", span: 3 },
+    { id: "w-confirm", type: "chart-confirm", span: 1 },
     { id: "w-activity", type: "list-activity", span: 2 },
     { id: "w-progress", type: "list-progress", span: 2 },
   ],

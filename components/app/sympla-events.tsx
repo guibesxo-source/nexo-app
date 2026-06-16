@@ -3,10 +3,29 @@
 /* Importar eventos do Sympla e vincular cada um ao evento Nexo correspondente. */
 import { useEffect, useState } from "react";
 import { Badge, Icon, Modal, useToast } from "@/components/app/kit";
-import { callSympla, syncSymplaEvent } from "@/components/app/sympla-sync";
+import { SymplaFieldPicker } from "@/components/app/sympla-field-picker";
+import {
+  callSympla,
+  loadSymplaParticipants,
+  syncSymplaParticipants,
+} from "@/components/app/sympla-sync";
 import { createEvent, useDb } from "@/lib/db";
-import type { SymplaEvent } from "@/lib/integrations/sympla";
+import {
+  defaultSymplaFieldKeys,
+  discoverSymplaFields,
+  type SymplaEvent,
+  type SymplaFieldOption,
+  type SymplaParticipant,
+} from "@/lib/integrations/sympla";
 import { fmtDate } from "@/lib/format";
+
+type PreparedEventImport = {
+  event: SymplaEvent;
+  targetId: string;
+  participants: SymplaParticipant[];
+  fields: SymplaFieldOption[];
+  selected: string[];
+};
 
 function toIso(start?: string): string {
   if (!start) return new Date().toISOString();
@@ -21,6 +40,7 @@ export function SymplaEventsModal({ onClose }: { onClose: () => void }) {
 
   const [events, setEvents] = useState<SymplaEvent[] | null>(null);
   const [target, setTarget] = useState<Record<string, string>>({});
+  const [prepared, setPrepared] = useState<PreparedEventImport | null>(null);
   const [busy, setBusy] = useState<"load" | string | null>("load");
   const [error, setError] = useState("");
 
@@ -41,40 +61,62 @@ export function SymplaEventsModal({ onClose }: { onClose: () => void }) {
     return () => { active = false; };
   }, [token]);
 
-  const importFrom = async (se: SymplaEvent) => {
+  const prepareFrom = async (se: SymplaEvent) => {
     const sid = String(se.id);
-    const tgt = target[sid] || "new";
-    setBusy(sid);
+    setBusy(`prep:${sid}`);
     setError("");
     try {
-      let eventId = tgt;
+      const participants = await loadSymplaParticipants(token, sid);
+      setPrepared({
+        event: se,
+        targetId: target[sid] || "new",
+        participants,
+        fields: discoverSymplaFields(participants),
+        selected: defaultSymplaFieldKeys(participants),
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha ao carregar participantes");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const importPrepared = async () => {
+    if (!prepared) return;
+    const sid = String(prepared.event.id);
+    setBusy(`sync:${sid}`);
+    setError("");
+    try {
+      let eventId = prepared.targetId;
       let where = "";
-      if (tgt === "new") {
+      if (prepared.targetId === "new") {
         eventId = createEvent({
-          name: se.name ?? `Evento Sympla ${sid}`,
+          name: prepared.event.name ?? `Evento Sympla ${sid}`,
           status: "planejamento",
-          starts_at: toIso(se.start_date),
-          location: se.address?.city ?? se.address?.name ?? "-",
+          starts_at: toIso(prepared.event.start_date),
+          location: prepared.event.address?.city ?? prepared.event.address?.name ?? "-",
           capacity: 0,
           budget_planned: 0,
         });
         where = "novo evento no Nexo";
       } else {
-        where = db.events.find((e) => e.id === tgt)?.name ?? "evento";
+        where = db.events.find((event) => event.id === prepared.targetId)?.name ?? "evento";
       }
 
-      const result = await syncSymplaEvent({
+      const result = await syncSymplaParticipants({
         eventId,
-        token,
         symplaEventId: sid,
-        symplaEventName: se.name,
+        symplaEventName: prepared.event.name,
+        participants: prepared.participants,
+        fieldKeys: prepared.selected,
       });
 
       toast(
         `${result.added} novo${result.added === 1 ? "" : "s"} · ${result.updated} atualizado${result.updated === 1 ? "" : "s"} · ` +
-          (tgt === "new" ? where : `para ${where}`) +
-          (result.invalid > 0 ? ` (${result.invalid} sem email válido)` : "")
+          (prepared.targetId === "new" ? where : `para ${where}`) +
+          (result.invalid > 0 ? ` (${result.invalid} sem email valido)` : "")
       );
+      setPrepared(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha ao importar");
     } finally {
@@ -86,18 +128,54 @@ export function SymplaEventsModal({ onClose }: { onClose: () => void }) {
     <Modal
       title="Importar eventos do Sympla"
       onClose={onClose}
-      width={560}
-      footer={<button className="btn" onClick={onClose}>Fechar</button>}
+      width={prepared ? 680 : 560}
+      footer={
+        prepared ? (
+          <>
+            <button className="btn" onClick={() => setPrepared(null)} disabled={busy !== null}>Voltar</button>
+            <button
+              className="btn btn-primary"
+              onClick={importPrepared}
+              disabled={busy !== null || prepared.participants.length === 0}
+            >
+              {busy === `sync:${String(prepared.event.id)}`
+                ? "Sincronizando..."
+                : `Importar ${prepared.participants.length} inscritos`}
+            </button>
+          </>
+        ) : (
+          <button className="btn" onClick={onClose}>Fechar</button>
+        )
+      }
     >
       <p style={{ fontSize: 13, color: "var(--dim)", marginTop: 0, marginBottom: 16 }}>
         Para cada evento do Sympla, crie um evento novo no Nexo ou vincule a um evento existente.
-        Depois do primeiro sync, o dashboard atualiza sozinho enquanto estiver aberto.
+        Depois escolha os campos que vao alimentar a lista de inscritos.
       </p>
 
       {busy === "load" && <p style={{ fontSize: 13, color: "var(--dim)" }}>Carregando eventos...</p>}
       {error && <p className="field-err" style={{ marginTop: 0 }}>{error}</p>}
 
-      {events && events.length > 0 && (
+      {prepared && (
+        <div className="sympla-config">
+          <div className="sympla-config-head">
+            <div>
+              <div className="nm">{prepared.event.name ?? `Evento #${prepared.event.id}`}</div>
+              <div className="sub">
+                {prepared.participants.length} participante{prepared.participants.length === 1 ? "" : "s"} encontrado{prepared.participants.length === 1 ? "" : "s"}
+                {prepared.fields.length > 0 && <> · {prepared.selected.length} campo{prepared.selected.length === 1 ? "" : "s"} extra{prepared.selected.length === 1 ? "" : "s"}</>}
+              </div>
+            </div>
+          </div>
+          <SymplaFieldPicker
+            fields={prepared.fields}
+            selected={prepared.selected}
+            onChange={(selected) => setPrepared((current) => current ? { ...current, selected } : current)}
+          />
+        </div>
+      )}
+
+      {!prepared && events && events.length > 0 && (
         <div className="sympla-ev-list">
           {events.map((se) => {
             const sid = String(se.id);
@@ -121,17 +199,17 @@ export function SymplaEventsModal({ onClose }: { onClose: () => void }) {
                   >
                     <option value="new">+ Criar evento no Nexo</option>
                     {db.events.length > 0 && <option disabled>-- linkar a existente --</option>}
-                    {db.events.map((e) => (
-                      <option key={e.id} value={e.id}>{e.name}</option>
+                    {db.events.map((event) => (
+                      <option key={event.id} value={event.id}>{event.name}</option>
                     ))}
                   </select>
                   <button
                     className="btn btn-primary btn-sm"
-                    onClick={() => importFrom(se)}
+                    onClick={() => prepareFrom(se)}
                     disabled={busy !== null}
                     style={{ flexShrink: 0 }}
                   >
-                    {busy === sid ? "..." : "Sincronizar"}
+                    {busy === `prep:${sid}` ? "..." : "Campos"}
                   </button>
                 </div>
               </div>
@@ -140,10 +218,12 @@ export function SymplaEventsModal({ onClose }: { onClose: () => void }) {
         </div>
       )}
 
-      <p style={{ fontSize: 12.5, color: "var(--dim)", marginTop: 14, marginBottom: 0 }}>
-        <Icon name="bolt" size={13} /> Eventos novos entram como planejamento; depois ajuste
-        capacidade, orçamento e checklist.
-      </p>
+      {!prepared && (
+        <p style={{ fontSize: 12.5, color: "var(--dim)", marginTop: 14, marginBottom: 0 }}>
+          <Icon name="bolt" size={13} /> Eventos novos entram como planejamento; depois ajuste
+          capacidade, orcamento e checklist.
+        </p>
+      )}
     </Modal>
   );
 }

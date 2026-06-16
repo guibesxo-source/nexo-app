@@ -196,6 +196,17 @@ export async function hydrate() {
     const me = memberRows.find((r) => r.profile_id === user.id);
     const ws = (wsR.data ?? null) as Row | null;
     const events = (eventsR.data ?? []) as Row[];
+    const settings = ((setR.data as Row | null)?.data as AppSettings) ?? { toggles: {} };
+    const attendeeLeadFields = settings.attendee_lead_fields ?? {};
+    const attendees = ((attendeesR.data ?? []) as Row[]).map((r) => {
+      const attendee = map.rowToAttendee(r);
+      return {
+        ...attendee,
+        lead_fields: attendee.lead_fields?.length
+          ? attendee.lead_fields
+          : attendeeLeadFields[attendee.id] ?? [],
+      };
+    });
 
     state = {
       v: SEED_VERSION,
@@ -210,13 +221,13 @@ export async function hydrate() {
       },
       members: memberRows.map(map.rowToMember),
       events: events.map(map.rowToEvent),
-      attendees: ((attendeesR.data ?? []) as Row[]).map(map.rowToAttendee),
+      attendees,
       tasks: ((tasksR.data ?? []) as Row[]).map((r) => map.rowToTask(r, attByTask.get(String(r.id)))),
       categories: ((catsR.data ?? []) as Row[]).map(map.rowToCategory),
       transactions: ((txR.data ?? []) as Row[]).map(map.rowToTransaction),
       templates: ((tplR.data ?? []) as Row[]).map(map.rowToTemplate),
       activity: ((actR.data ?? []) as Row[]).map(map.rowToActivity),
-      settings: ((setR.data as Row | null)?.data as AppSettings) ?? { toggles: {} },
+      settings,
     };
   } catch (e) {
     console.error("[db] hidratação falhou:", e);
