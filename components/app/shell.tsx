@@ -525,6 +525,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const ready = useHydrated();
   const [menuOpen, setMenuOpen] = useState(false);
   const [newEventOpen, setNewEventOpen] = useState(false);
+  const [authed, setAuthed] = useState<boolean | null>(null);
 
   const route = routeIdFromPath(pathname);
   const user = ready ? currentUser(db) : undefined;
@@ -545,6 +546,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     let active = true;
     supabase.auth.getUser().then(({ data: { user: u } }) => {
       if (!active) return;
+      setAuthed(!!u);
       if (!u) {
         router.replace("/login");
         return;
@@ -574,7 +576,39 @@ export function AppShell({ children }: { children: ReactNode }) {
     router.push(ROUTES[id] || ROUTES.dashboard);
   };
 
-  if (!ready || !user) return null;
+  if (!ready || authed === null) return null; // carregando workspace
+  if (!authed) return null; // sem sessão → o efeito acima redireciona pro /login
+
+  // Autenticado, mas o workspace não carregou (ex.: banco sem a migration
+  // aplicada, ou provisionamento falhou). Mostra um erro em vez de tela branca.
+  if (!user)
+    return (
+      <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 24 }}>
+        <div style={{ maxWidth: 440, textAlign: "center" }}>
+          <h1 style={{ fontSize: 19, fontWeight: 800, letterSpacing: "-0.03em", marginBottom: 8 }}>
+            Não consegui carregar seu workspace
+          </h1>
+          <p style={{ fontSize: 13, lineHeight: 1.5, color: "var(--dim)", marginBottom: 22 }}>
+            Confirme que o banco foi configurado (migration aplicada no Supabase) e tente de novo.
+          </p>
+          <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+            <button className="btn btn-primary" onClick={() => window.location.reload()}>
+              Tentar de novo
+            </button>
+            <button
+              className="btn"
+              onClick={async () => {
+                await createClient().auth.signOut();
+                logout();
+                router.replace("/login");
+              }}
+            >
+              Sair
+            </button>
+          </div>
+        </div>
+      </div>
+    );
 
   return (
     <ToastHost>

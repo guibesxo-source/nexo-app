@@ -1,5 +1,6 @@
-// Mutações da camada de dados — uma função por operação, espelhando o que
-// virarão Server Actions/queries Supabase. A UI só importa de @/lib/db.
+// Mutações da camada de dados — uma função por operação. Cada uma muta a
+// memória (mutate → UI reativa, instantânea) e grava write-through no Supabase
+// (sb*). A UI só importa de @/lib/db e não sabe que existe banco.
 
 import type {
   Attendee,
@@ -13,7 +14,6 @@ import type {
   EventFormat,
   EventPriority,
   Member,
-  MemberRole,
   SymplaEventLink,
   Task,
   TaskAttachment,
@@ -24,54 +24,66 @@ import type {
   TxPayment,
 } from "@/types";
 import { initialsOf, fmtMoney } from "@/lib/format";
-import { endSession, mutate, newId, switchUser } from "./store";
+import {
+  clearSession,
+  currentWorkspaceId,
+  mutate,
+  newId,
+  rehydrate,
+  saveSelectedEvent,
+  saveSettings,
+  sbDelete,
+  sbInsert,
+  sbUpdate,
+} from "./store";
+import {
+  activityToRow,
+  attendeeToRow,
+  eventToRow,
+  memberToRow,
+  taskToRow,
+  transactionToRow,
+  templateToRow,
+  attachmentToRow,
+} from "./supabase-map";
 import { DEFAULT_DASHBOARD, customMetricIcon } from "./derived";
 
 const now = () => new Date().toISOString();
+const ws = () => currentWorkspaceId();
+
+type Row = Record<string, unknown>;
 
 function logActivity(icon: string, text: string[]) {
-  mutate((s) => ({
-    ...s,
-    activity: [
-      { id: newId(), icon, text, created_at: now() },
-      ...s.activity,
-    ].slice(0, 50),
-  }));
+  const entry = { id: newId(), icon, text, created_at: now() };
+  mutate((s) => ({ ...s, activity: [entry, ...s.activity].slice(0, 50) }));
+  const w = ws();
+  if (w) sbInsert("activity", activityToRow(w, entry));
+}
+
+/** Patch de task (UI) → patch de linha (renomeia group → task_group). */
+function taskPatchToRow(patch: Record<string, unknown>): Row {
+  const out: Row = {};
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === undefined) continue;
+    out[k === "group" ? "task_group" : k] = v;
+  }
+  return out;
 }
 
 /* ---------- Sessão ---------- */
 
-/**
- * Login demo: carrega (ou cria) a base deste email no navegador e o usuário
- * assume o perfil de owner do workspace dela.
- */
-export function login(name: string, email: string) {
-  switchUser(email);
-  mutate((s) => {
-    const owner = s.members.find((m) => m.role === "owner");
-    const ownerId = owner?.id ?? newId();
-    const members = owner
-      ? s.members.map((m) =>
-          m.id === ownerId ? { ...m, name, email, initials: initialsOf(name) } : m
-        )
-      : [
-          {
-            id: ownerId, name, email, initials: initialsOf(name),
-            role: "owner" as MemberRole, title: "Produtor", created_at: now(),
-          },
-          ...s.members,
-        ];
-    return { ...s, members, session: { ...s.session, user_id: ownerId } };
-  });
+/** Login: identidade e dados vêm do Supabase — (re)hidrata o workspace do usuário. */
+export function login(_name: string, _email: string) {
+  void rehydrate();
 }
 
 export function logout() {
-  // grava a base do usuário com a sessão fechada e libera o navegador
-  endSession();
+  clearSession();
 }
 
 export function selectEvent(eventId: string) {
   mutate((s) => ({ ...s, session: { ...s.session, selected_event_id: eventId } }));
+  saveSelectedEvent(eventId);
 }
 
 /* ---------- Eventos ---------- */
@@ -95,19 +107,23 @@ export type EventDraft = Pick<
 
 export function createEvent(draft: EventDraft): string {
   const id = newId();
-  mutate((s) => ({
-    ...s,
-    events: [
-      {
-        ...draft,
-        id,
-        cover: draft.cover ?? EVENT_COVERS[s.events.length % EVENT_COVERS.length].css,
-        created_at: now(),
-      },
-      ...s.events,
-    ],
-    session: { ...s.session, selected_event_id: id },
-  }));
+  let event!: Event;
+  mutate((s) => {
+    event = {
+      ...draft,
+      id,
+      cover: draft.cover ?? EVENT_COVERS[s.events.length % EVENT_COVERS.length].css,
+      created_at: now(),
+    };
+    return {
+      ...s,
+      events: [event, ...s.events],
+      session: { ...s.session, selected_event_id: id },
+    };
+  });
+  saveSelectedEvent(id);
+  const w = ws();
+  if (w) sbInsert("events", eventToRow(w, event));
   logActivity("🗓️", ["Evento ", draft.name, " criado"]);
   return id;
 }
@@ -117,12 +133,14 @@ export function updateEvent(id: string, patch: Partial<EventDraft>) {
     ...s,
     events: s.events.map((e) => (e.id === id ? { ...e, ...patch } : e)),
   }));
+  if (ws()) sbUpdate("events", id, patch as Row);
 }
 
 export function deleteEvent(id: string) {
+  let selected: string | null = null;
   mutate((s) => {
     const events = s.events.filter((e) => e.id !== id);
-    const selected =
+    selected =
       s.session.selected_event_id === id
         ? (events[0]?.id ?? null)
         : s.session.selected_event_id;
@@ -135,6 +153,9 @@ export function deleteEvent(id: string) {
       session: { ...s.session, selected_event_id: selected },
     };
   });
+  saveSelectedEvent(selected);
+  // FK on delete cascade derruba attendees/tasks/transactions/anexos no banco.
+  if (ws()) sbDelete("events", id);
 }
 
 /* ---------- Inscritos ---------- */
@@ -154,10 +175,10 @@ export type AttendeeImportResult = {
 
 export function addAttendee(eventId: string, draft: AttendeeDraft): string {
   const id = newId();
-  mutate((s) => ({
-    ...s,
-    attendees: [{ ...draft, id, event_id: eventId, created_at: now() }, ...s.attendees],
-  }));
+  const attendee: Attendee = { ...draft, id, event_id: eventId, created_at: now() };
+  mutate((s) => ({ ...s, attendees: [attendee, ...s.attendees] }));
+  const w = ws();
+  if (w) sbInsert("attendees", attendeeToRow(w, attendee));
   logActivity("🎫", ["", draft.name, " inscrito(a) no evento"]);
   return id;
 }
@@ -171,6 +192,7 @@ export function setAttendeeStatus(id: string, status: AttendeeStatus) {
       return a.id === id ? { ...a, status } : a;
     }),
   }));
+  if (ws()) sbUpdate("attendees", id, { status });
   if (status === "confirmado") logActivity("👤", ["", name, " confirmou presença"]);
   if (status === "checkin") logActivity("✅", ["", name, " fez check-in"]);
 }
@@ -185,11 +207,11 @@ export function importAttendees(
 ): AttendeeImportResult {
   let added = 0;
   let skipped = 0;
+  const fresh: Attendee[] = [];
   mutate((s) => {
     const seen = new Set(
       s.attendees.filter((a) => a.event_id === eventId).map((a) => a.email.toLowerCase())
     );
-    const fresh: Attendee[] = [];
     for (const d of drafts) {
       const key = d.email.trim().toLowerCase();
       if (!key || seen.has(key)) {
@@ -202,6 +224,8 @@ export function importAttendees(
     }
     return fresh.length ? { ...s, attendees: [...fresh, ...s.attendees] } : s;
   });
+  const w = ws();
+  if (w && fresh.length) sbInsert("attendees", fresh.map((a) => attendeeToRow(w, a)));
   if (added > 0) {
     logActivity("📥", ["", `${added} inscrito${added === 1 ? "" : "s"}`, " importados para o evento"]);
   }
@@ -238,6 +262,8 @@ export function syncAttendees(eventId: string, drafts: AttendeeDraft[]): Attende
   let added = 0;
   let skipped = 0;
   let updated = 0;
+  const freshList: Attendee[] = [];
+  const updatedList: Attendee[] = [];
 
   mutate((s) => {
     const existing = s.attendees.filter((a) => a.event_id === eventId);
@@ -255,7 +281,6 @@ export function syncAttendees(eventId: string, drafts: AttendeeDraft[]): Attende
 
     const consumedLegacy = new Set<string>();
     const next = [...s.attendees];
-    const fresh: Attendee[] = [];
 
     const replace = (id: string, draft: AttendeeDraft) => {
       const idx = next.findIndex((a) => a.id === id);
@@ -266,6 +291,7 @@ export function syncAttendees(eventId: string, drafts: AttendeeDraft[]): Attende
         return;
       }
       next[idx] = patched;
+      updatedList.push(patched);
       updated++;
     };
 
@@ -291,12 +317,20 @@ export function syncAttendees(eventId: string, drafts: AttendeeDraft[]): Attende
         continue;
       }
 
-      fresh.push({ ...d, id: newId(), event_id: eventId, created_at: now() });
+      const fresh: Attendee = { ...d, id: newId(), event_id: eventId, created_at: now() };
+      freshList.push(fresh);
+      next.unshift(fresh);
       added++;
     }
 
-    return fresh.length || updated > 0 ? { ...s, attendees: [...fresh, ...next] } : s;
+    return freshList.length || updated > 0 ? { ...s, attendees: next } : s;
   });
+
+  const w = ws();
+  if (w) {
+    if (freshList.length) sbInsert("attendees", freshList.map((a) => attendeeToRow(w, a)));
+    for (const a of updatedList) sbUpdate("attendees", a.id, attendeeToRow(w, a));
+  }
 
   if (added > 0 || updated > 0) {
     logActivity("📥", [
@@ -310,6 +344,7 @@ export function syncAttendees(eventId: string, drafts: AttendeeDraft[]): Attende
 
 export function removeAttendee(id: string) {
   mutate((s) => ({ ...s, attendees: s.attendees.filter((a) => a.id !== id) }));
+  if (ws()) sbDelete("attendees", id);
 }
 
 /* ---------- Checklist ---------- */
@@ -318,13 +353,10 @@ export type TaskDraft = Pick<Task, "title" | "group" | "phase" | "assignee_id" |
 
 export function addTask(eventId: string, draft: TaskDraft): string {
   const id = newId();
-  mutate((s) => ({
-    ...s,
-    tasks: [
-      { ...draft, id, event_id: eventId, status: "aberta", created_at: now() },
-      ...s.tasks,
-    ],
-  }));
+  const task: Task = { ...draft, id, event_id: eventId, status: "aberta", created_at: now() };
+  mutate((s) => ({ ...s, tasks: [task, ...s.tasks] }));
+  const w = ws();
+  if (w) sbInsert("tasks", taskToRow(w, task));
   return id;
 }
 
@@ -340,11 +372,13 @@ export function toggleTask(id: string) {
       return { ...t, status: nowDone ? "concluida" : "aberta" };
     }),
   }));
+  if (ws()) sbUpdate("tasks", id, { status: nowDone ? "concluida" : "aberta" });
   if (nowDone) logActivity("✅", ["Tarefa ", `“${title}”`, " concluída"]);
 }
 
 export function removeTask(id: string) {
   mutate((s) => ({ ...s, tasks: s.tasks.filter((t) => t.id !== id) }));
+  if (ws()) sbDelete("tasks", id); // anexos caem por FK cascade
 }
 
 /* ---------- Detalhe da tarefa (descrição, anexos, custo) ---------- */
@@ -358,6 +392,7 @@ export function updateTask(id: string, patch: TaskPatch) {
     ...s,
     tasks: s.tasks.map((t) => (t.id === id ? { ...t, ...patch } : t)),
   }));
+  if (ws()) sbUpdate("tasks", id, taskPatchToRow(patch));
 }
 
 export type TaskAttachmentDraft = Pick<TaskAttachment, "name" | "kind" | "data">;
@@ -370,6 +405,8 @@ export function addTaskAttachment(taskId: string, draft: TaskAttachmentDraft) {
       t.id === taskId ? { ...t, attachments: [...(t.attachments ?? []), att] } : t
     ),
   }));
+  const w = ws();
+  if (w) sbInsert("task_attachments", attachmentToRow(w, taskId, att));
 }
 
 export function removeTaskAttachment(taskId: string, attId: string) {
@@ -381,6 +418,7 @@ export function removeTaskAttachment(taskId: string, attId: string) {
         : t
     ),
   }));
+  if (ws()) sbDelete("task_attachments", attId);
 }
 
 /**
@@ -392,6 +430,7 @@ export function logTaskToFinance(taskId: string): string | null {
   let newTxId: string | null = null;
   let amount = 0;
   let title = "";
+  let createdTx: Transaction | null = null;
   mutate((s) => {
     const t = s.tasks.find((x) => x.id === taskId);
     if (!t || !t.cost_estimate || t.cost_estimate <= 0 || t.finance_tx_id) return s;
@@ -411,12 +450,18 @@ export function logTaskToFinance(taskId: string): string | null {
       occurred_on: now().slice(0, 10),
       created_at: now(),
     };
+    createdTx = tx;
     return {
       ...s,
       transactions: [tx, ...s.transactions],
       tasks: s.tasks.map((x) => (x.id === taskId ? { ...x, finance_tx_id: id } : x)),
     };
   });
+  const w = ws();
+  if (w && createdTx && newTxId) {
+    sbInsert("transactions", transactionToRow(w, createdTx));
+    sbUpdate("tasks", taskId, { finance_tx_id: newTxId });
+  }
   if (newTxId) {
     logActivity("💰", ["Tarefa lançada no financeiro · ", fmtMoney(amount), ` · ${title}`]);
   }
@@ -429,6 +474,7 @@ export function unlinkTaskFinance(taskId: string) {
     ...s,
     tasks: s.tasks.map((t) => (t.id === taskId ? { ...t, finance_tx_id: null } : t)),
   }));
+  if (ws()) sbUpdate("tasks", taskId, { finance_tx_id: null });
 }
 
 /* ---------- Templates de checklist ---------- */
@@ -524,22 +570,27 @@ function offsetFromDue(startsAt: string | undefined, due: string | null): { offs
 /** Aplica um template ao evento: adiciona (sem apagar) as tarefas, com prazos calculados. */
 export function applyTemplate(eventId: string, template: ChecklistTemplate): number {
   let count = 0;
+  const created: Task[] = [];
   mutate((s) => {
     const ev = s.events.find((e) => e.id === eventId);
-    const created = template.items.map((it): Task => ({
-      id: newId(),
-      event_id: eventId,
-      title: it.title,
-      group: it.group,
-      phase: it.phase ?? phaseFromOffset(it.offset_days),
-      status: "aberta",
-      assignee_id: null,
-      due_date: dueFromOffset(ev?.starts_at, it.offset_days),
-      created_at: now(),
-    }));
+    for (const it of template.items) {
+      created.push({
+        id: newId(),
+        event_id: eventId,
+        title: it.title,
+        group: it.group,
+        phase: it.phase ?? phaseFromOffset(it.offset_days),
+        status: "aberta",
+        assignee_id: null,
+        due_date: dueFromOffset(ev?.starts_at, it.offset_days),
+        created_at: now(),
+      });
+    }
     count = created.length;
     return { ...s, tasks: [...created, ...s.tasks] };
   });
+  const w = ws();
+  if (w && created.length) sbInsert("tasks", created.map((t) => taskToRow(w, t)));
   if (count > 0) {
     logActivity("🧩", ["Template ", template.name, ` aplicado · ${count} tarefas`]);
   }
@@ -550,6 +601,7 @@ export function applyTemplate(eventId: string, template: ChecklistTemplate): num
 export function saveChecklistAsTemplate(eventId: string, name: string): string {
   const id = newId();
   const clean = name.trim();
+  let tpl!: ChecklistTemplate;
   mutate((s) => {
     const ev = s.events.find((e) => e.id === eventId);
     const items: ChecklistTemplateItem[] = s.tasks
@@ -563,15 +615,18 @@ export function saveChecklistAsTemplate(eventId: string, name: string): string {
           ...off,
         };
       });
-    const tpl: ChecklistTemplate = { id, name: clean, format: ev?.format, builtin: false, items };
+    tpl = { id, name: clean, format: ev?.format, builtin: false, items };
     return { ...s, templates: [tpl, ...s.templates] };
   });
+  const w = ws();
+  if (w) sbInsert("checklist_templates", templateToRow(w, tpl));
   logActivity("🧩", ["Template ", clean, " salvo"]);
   return id;
 }
 
 export function removeTemplate(id: string) {
   mutate((s) => ({ ...s, templates: s.templates.filter((t) => t.id !== id) }));
+  if (ws()) sbDelete("checklist_templates", id);
 }
 
 /* ---------- Financeiro ---------- */
@@ -590,10 +645,10 @@ export type TransactionDraft = {
 
 export function addTransaction(eventId: string, draft: TransactionDraft): string {
   const id = newId();
-  mutate((s) => ({
-    ...s,
-    transactions: [{ ...draft, id, event_id: eventId, created_at: now() }, ...s.transactions],
-  }));
+  const tx: Transaction = { ...draft, id, event_id: eventId, created_at: now() };
+  mutate((s) => ({ ...s, transactions: [tx, ...s.transactions] }));
+  const w = ws();
+  if (w) sbInsert("transactions", transactionToRow(w, tx));
   logActivity("💰", [
     draft.kind === "entrada" ? "Receita de " : "Lançamento de ",
     fmtMoney(draft.amount),
@@ -608,6 +663,7 @@ export function updateTransaction(id: string, patch: Partial<TransactionDraft>) 
     ...s,
     transactions: s.transactions.map((t) => (t.id === id ? { ...t, ...patch } : t)),
   }));
+  if (ws()) sbUpdate("transactions", id, patch as Row);
   logActivity("✏️", ["Lançamento editado", patch.description ? ` · ${patch.description}` : ""]);
 }
 
@@ -621,10 +677,12 @@ export function setTransactionFile(
     ...s,
     transactions: s.transactions.map((t) => (t.id === id ? { ...t, [field]: file } : t)),
   }));
+  if (ws()) sbUpdate("transactions", id, { [field]: file });
 }
 
 export function removeTransaction(id: string) {
   mutate((s) => ({ ...s, transactions: s.transactions.filter((t) => t.id !== id) }));
+  if (ws()) sbDelete("transactions", id);
 }
 
 export function setBudget(eventId: string, budget: number) {
@@ -632,6 +690,7 @@ export function setBudget(eventId: string, budget: number) {
     ...s,
     events: s.events.map((e) => (e.id === eventId ? { ...e, budget_planned: budget } : e)),
   }));
+  if (ws()) sbUpdate("events", eventId, { budget_planned: budget });
 }
 
 /* ---------- Membros ---------- */
@@ -640,10 +699,10 @@ export type MemberDraft = Pick<Member, "name" | "email" | "role" | "title">;
 
 export function addMember(draft: MemberDraft): string {
   const id = newId();
-  mutate((s) => ({
-    ...s,
-    members: [...s.members, { ...draft, id, initials: initialsOf(draft.name), created_at: now() }],
-  }));
+  const member: Member = { ...draft, id, initials: initialsOf(draft.name), created_at: now() };
+  mutate((s) => ({ ...s, members: [...s.members, member] }));
+  const w = ws();
+  if (w) sbInsert("members", memberToRow(w, member));
   logActivity("👥", ["", draft.name, " entrou na organização"]);
   return id;
 }
@@ -654,12 +713,16 @@ export function removeMember(id: string) {
     members: s.members.filter((m) => m.id !== id),
     tasks: s.tasks.map((t) => (t.assignee_id === id ? { ...t, assignee_id: null } : t)),
   }));
+  // tasks.assignee_id cai para null por FK on delete set null no banco.
+  if (ws()) sbDelete("members", id);
 }
 
 /* ---------- Workspace & preferências ---------- */
 
 export function updateWorkspace(patch: Partial<{ name: string; timezone: string }>) {
   mutate((s) => ({ ...s, workspace: { ...s.workspace, ...patch } }));
+  const w = ws();
+  if (w) sbUpdate("workspaces", w, patch as Row);
 }
 
 export function updateProfile(userId: string, patch: Partial<Pick<Member, "name" | "email">>) {
@@ -671,10 +734,16 @@ export function updateProfile(userId: string, patch: Partial<Pick<Member, "name"
         : m
     ),
   }));
+  if (ws()) {
+    const row: Row = { ...patch };
+    if (patch.name) row.initials = initialsOf(patch.name);
+    sbUpdate("members", userId, row);
+  }
 }
 
 export function setSymplaToken(token: string | null) {
   mutate((s) => ({ ...s, settings: { ...s.settings, sympla_token: token } }));
+  saveSettings();
 }
 
 export function setSymplaEventLink(
@@ -693,18 +762,22 @@ export function setSymplaEventLink(
     }
     return { ...s, settings: { ...s.settings, sympla_event_links: links } };
   });
+  saveSettings();
 }
 
 export function setHubspotToken(token: string | null) {
   mutate((s) => ({ ...s, settings: { ...s.settings, hubspot_token: token } }));
+  saveSettings();
 }
 
 export function setClickupToken(token: string | null) {
   mutate((s) => ({ ...s, settings: { ...s.settings, clickup_token: token } }));
+  saveSettings();
 }
 
 export function setSidebarCollapsed(collapsed: boolean) {
   mutate((s) => ({ ...s, settings: { ...s.settings, sidebar_collapsed: collapsed } }));
+  saveSettings();
 }
 
 /** Define/remove a foto de perfil do membro (data URL comprimido). */
@@ -713,6 +786,7 @@ export function setProfilePhoto(userId: string, dataUrl: string | null) {
     ...s,
     members: s.members.map((m) => (m.id === userId ? { ...m, avatar: dataUrl } : m)),
   }));
+  if (ws()) sbUpdate("members", userId, { avatar: dataUrl });
 }
 
 /* ---------- Dashboard customizável ---------- */
@@ -723,6 +797,7 @@ function mutateDashboard(fn: (d: DashboardConfig) => DashboardConfig) {
     ...s,
     settings: { ...s.settings, dashboard: fn(s.settings.dashboard ?? DEFAULT_DASHBOARD) },
   }));
+  saveSettings();
 }
 
 export function addDashboardWidget(widget: Omit<DashboardWidget, "id">): string {
@@ -757,6 +832,7 @@ export function reorderDashboard(orderedIds: string[]) {
 /** Volta o dashboard ao layout padrão. */
 export function resetDashboard() {
   mutate((s) => ({ ...s, settings: { ...s.settings, dashboard: null } }));
+  saveSettings();
 }
 
 export type CustomMetricDraft = Pick<CustomMetric, "label" | "source" | "agg" | "filter" | "format">;
@@ -796,11 +872,11 @@ export function importTasks(
 ): { added: number; skipped: number } {
   let added = 0;
   let skipped = 0;
+  const fresh: Task[] = [];
   mutate((s) => {
     const seen = new Set(
       s.tasks.filter((t) => t.event_id === eventId).map((t) => t.title.trim().toLowerCase())
     );
-    const fresh: Task[] = [];
     for (const d of drafts) {
       const key = d.title.trim().toLowerCase();
       if (!key || seen.has(key)) {
@@ -824,6 +900,8 @@ export function importTasks(
     }
     return fresh.length ? { ...s, tasks: [...fresh, ...s.tasks] } : s;
   });
+  const w = ws();
+  if (w && fresh.length) sbInsert("tasks", fresh.map((t) => taskToRow(w, t)));
   if (added > 0) {
     logActivity("🧩", ["", `${added} tarefa${added === 1 ? "" : "s"}`, " importada(s) do ClickUp"]);
   }
@@ -844,10 +922,12 @@ export function pushRecentSearch(term: string) {
       settings: { ...s.settings, recent_searches: [t, ...rest].slice(0, 8) },
     };
   });
+  saveSettings();
 }
 
 export function clearRecentSearches() {
   mutate((s) => ({ ...s, settings: { ...s.settings, recent_searches: [] } }));
+  saveSettings();
 }
 
 export function setToggle(key: string, value: boolean) {
@@ -855,4 +935,5 @@ export function setToggle(key: string, value: boolean) {
     ...s,
     settings: { ...s.settings, toggles: { ...s.settings.toggles, [key]: value } },
   }));
+  saveSettings();
 }

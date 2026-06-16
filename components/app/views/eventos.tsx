@@ -75,9 +75,9 @@ export function Eventos() {
           <>
             <button
               className="btn"
-              title="Os dados já salvam sozinhos a cada alteração — isso força um salvamento agora"
+              title="Os dados já salvam sozinhos na sua conta a cada alteração — isso força um salvamento agora"
               onClick={() =>
-                toast(saveNow() ? "Tudo salvo neste navegador" : "Não foi possível salvar — armazenamento cheio?")
+                toast(saveNow() ? "Tudo salvo na sua conta" : "Não foi possível salvar agora")
               }
             >
               <Icon name="save" size={15} />Salvar

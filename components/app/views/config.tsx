@@ -209,15 +209,15 @@ export function Config() {
                 <div>
                   <div className="sr-name">Restaurar dados demo</div>
                   <div className="sr-desc">
-                    Apaga todas as alterações feitas neste navegador e recarrega o workspace de demonstração.
+                    Apaga todos os dados da sua conta e recarrega o workspace de demonstração.
                   </div>
                 </div>
                 <button
                   className="btn btn-sm"
                   style={{ color: "var(--red)", borderColor: "var(--red)" }}
-                  onClick={() => {
-                    if (confirm("Restaurar o workspace demo? Suas alterações locais serão perdidas.")) {
-                      resetDemo();
+                  onClick={async () => {
+                    if (confirm("Restaurar o workspace demo? Os dados atuais da sua conta serão perdidos.")) {
+                      await resetDemo();
                       toast("Dados demo restaurados");
                     }
                   }}

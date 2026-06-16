@@ -1,28 +1,37 @@
-// Engine da camada de dados local: estado em memória + persistência em
-// localStorage + assinatura para React (useSyncExternalStore em index.ts).
-// Cada login tem sua própria base: o estado vive em `nexo:db:v1:<email>` e
-// `nexo:user` guarda quem está logado para hidratar automaticamente.
-// Esta é a implementação provisória de @/lib/db — quando o projeto Supabase
-// existir, as mutações/leituras passam a falar com o Postgres (RLS) mantendo
-// a mesma interface para a UI.
+// Engine da camada de dados: estado reativo em memória (useSyncExternalStore em
+// index.ts) hidratado do Supabase no login e gravado write-through a cada
+// mutação. A UI segue lendo SOMENTE de @/lib/db, alheia ao banco.
+//
+// Fluxo: a UI muta a memória (mutate → emit, instantâneo) e dispara a escrita
+// correspondente no Postgres (sb*). A hidratação resolve o workspace do usuário
+// logado (via memberships, sob RLS) e monta o DbState a partir das tabelas.
 
 import { seedState, SEED_VERSION, type DbState } from "./seed";
+import { createClient } from "@/lib/supabase/client";
+import { displayNameFromUser } from "@/lib/auth";
+import { seedWorkspace } from "./seed-supabase";
+import type { AppSettings, TaskAttachment } from "@/types";
+import * as map from "./supabase-map";
 
-const LEGACY_KEY = "nexo:db:v1"; // base única das versões anteriores
-const USER_KEY = "nexo:user";
+type Sb = ReturnType<typeof createClient>;
+type Row = Record<string, unknown>;
 
-const keyFor = (email: string) => `${LEGACY_KEY}:${email}`;
-const normEmail = (email: string) => email.trim().toLowerCase();
+const SELECTED_KEY = "nexo:selected_event"; // estado de navegação puro (não vai pro banco)
 
 // Snapshot inicial estável: usado no SSR/primeira renderização do client.
-// A hidratação a partir do localStorage acontece depois (AppShell/useEffect),
-// evitando divergência entre HTML do servidor e client.
+// A hidratação a partir do Supabase acontece depois (AppShell/useEffect).
 const initialState: DbState = seedState();
 
 let state: DbState = initialState;
-let activeEmail: string | null = null;
 let hydrated = false;
+let hydrating = false;
+let workspaceId: string | null = null;
+let sb: Sb | null = null;
 const listeners = new Set<() => void>();
+
+function client(): Sb {
+  return (sb ??= createClient());
+}
 
 export function getState(): DbState {
   return state;
@@ -41,128 +50,18 @@ function emit() {
   listeners.forEach((l) => l());
 }
 
-function persist(): boolean {
-  try {
-    localStorage.setItem(activeEmail ? keyFor(activeEmail) : LEGACY_KEY, JSON.stringify(state));
-    return true;
-  } catch {
-    // storage cheio/indisponível: o app segue funcionando em memória
-    return false;
-  }
-}
-
-/** Salva o estado atual agora (botão "Salvar"); o auto-save já roda a cada mutação. */
-export function saveNow(): boolean {
-  return persist();
-}
-
-/**
- * Migra uma base salva para a versão atual preservando os dados do usuário.
- * Rejeita (null) bases mais novas que o código para não corromper nada.
- */
-function migrate(saved: DbState): DbState | null {
-  if (!saved || typeof saved.v !== "number") return null;
-  if (saved.v > SEED_VERSION) return null;
-  let s = saved;
-  if (s.v < 2) {
-    // v1 → v2: introduz templates de checklist (custom). Dados existentes ficam intactos.
-    s = { ...s, templates: (s as Partial<DbState>).templates ?? [], v: 2 };
-  }
-  return s;
-}
-
-function loadKey(key: string): DbState | null {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return null;
-    return migrate(JSON.parse(raw) as DbState);
-  } catch {
-    return null;
-  }
-}
-
-export function mutate(fn: (s: DbState) => DbState) {
-  state = fn(state);
-  persist();
-  emit();
-}
-
-/** A hidratação do localStorage já aconteceu neste client? */
 export function isHydrated(): boolean {
   return hydrated;
 }
 
-/** Carrega a base do usuário logado (chamar uma vez, no client). */
-export function hydrate() {
-  if (hydrated || typeof window === "undefined") return;
-  hydrated = true;
-  try {
-    activeEmail = localStorage.getItem(USER_KEY);
-    let saved = activeEmail ? loadKey(keyFor(activeEmail)) : null;
-
-    // Migração da base única antiga: adota como a base do usuário que
-    // estava logado nela (uma vez) e passa a viver na chave por usuário.
-    if (!saved) {
-      const legacy = loadKey(LEGACY_KEY);
-      if (legacy) {
-        if (!activeEmail && legacy.session.user_id) {
-          const owner = legacy.members.find((m) => m.id === legacy.session.user_id);
-          if (owner?.email) {
-            activeEmail = normEmail(owner.email);
-            localStorage.setItem(USER_KEY, activeEmail);
-          }
-        }
-        if (activeEmail) {
-          saved = legacy;
-          localStorage.setItem(keyFor(activeEmail), JSON.stringify(legacy));
-        }
-      }
-    }
-
-    if (saved) state = saved;
-  } catch {
-    // estado corrompido: mantém o seed
-  }
-  emit();
+/** Workspace ativo (null antes do login/hidratação). */
+export function currentWorkspaceId(): string | null {
+  return workspaceId;
 }
 
-/**
- * Troca para a base do email informado (login): carrega o que esse usuário
- * já tinha neste navegador ou nasce um workspace demo novo para ele.
- */
-export function switchUser(email: string) {
-  activeEmail = normEmail(email);
-  try {
-    localStorage.setItem(USER_KEY, activeEmail);
-  } catch {
-    // sem storage: segue em memória
-  }
-  state = loadKey(keyFor(activeEmail)) ?? seedState();
-  persist();
-  emit();
-}
-
-/** Logout: grava a base do usuário com a sessão fechada e volta ao seed neutro. */
-export function endSession() {
-  state = { ...state, session: { ...state.session, user_id: null } };
-  persist();
-  activeEmail = null;
-  try {
-    localStorage.removeItem(USER_KEY);
-  } catch {
-    // sem storage: nada a limpar
-  }
-  state = seedState();
-  emit();
-}
-
-/** Restaura o workspace demo do zero (Config → zona de perigo). */
-export function resetDemo() {
-  const fresh = seedState();
-  // preserva a sessão para não deslogar ao resetar os dados
-  fresh.session = { ...state.session, selected_event_id: fresh.session.selected_event_id };
-  state = fresh;
-  persist();
+/** Mutação só em memória + notificação ao React. O write-through é explícito nas actions. */
+export function mutate(fn: (s: DbState) => DbState) {
+  state = fn(state);
   emit();
 }
 
@@ -170,6 +69,211 @@ export function newId(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
     : Math.random().toString(36).slice(2);
+}
+
+/* ---------- Write-through (fire-and-forget; no-op se não conectado) ---------- */
+
+function logErr(ctx: string, error: { message?: string } | null) {
+  if (error) console.error(`[db] ${ctx}:`, error.message ?? error);
+}
+
+export function sbInsert(table: string, rows: Row | Row[]) {
+  if (!workspaceId) return;
+  void client()
+    .from(table)
+    .insert(rows as never)
+    .then(({ error }) => logErr(`insert ${table}`, error));
+}
+
+export function sbUpdate(table: string, id: string, patch: Row) {
+  if (!workspaceId) return;
+  void client()
+    .from(table)
+    .update(patch as never)
+    .eq("id", id)
+    .then(({ error }) => logErr(`update ${table}`, error));
+}
+
+export function sbDelete(table: string, id: string | string[]) {
+  if (!workspaceId) return;
+  const q = client().from(table).delete();
+  void (Array.isArray(id) ? q.in("id", id) : q.eq("id", id)).then(({ error }) =>
+    logErr(`delete ${table}`, error)
+  );
+}
+
+export function sbUpsert(table: string, rows: Row | Row[], onConflict?: string) {
+  if (!workspaceId) return;
+  void client()
+    .from(table)
+    .upsert(rows as never, onConflict ? { onConflict } : undefined)
+    .then(({ error }) => logErr(`upsert ${table}`, error));
+}
+
+/** Salva o blob de settings inteiro do estado atual (preferências/tokens/dashboard). */
+export function saveSettings() {
+  if (!workspaceId) return;
+  void client()
+    .from("app_settings")
+    .upsert({ workspace_id: workspaceId, data: getState().settings }, { onConflict: "workspace_id" })
+    .then(({ error }) => logErr("upsert app_settings", error));
+}
+
+/** Persiste o evento selecionado (estado de navegação) no navegador. */
+export function saveSelectedEvent(id: string | null) {
+  try {
+    if (id) localStorage.setItem(SELECTED_KEY, id);
+    else localStorage.removeItem(SELECTED_KEY);
+  } catch {
+    // sem storage: segue só em memória
+  }
+}
+
+function loadSelectedEvent(): string | null {
+  try {
+    return localStorage.getItem(SELECTED_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/* ---------- Hidratação ---------- */
+
+/** Carrega o workspace do usuário logado a partir do Supabase (uma vez, no client). */
+export async function hydrate() {
+  if (hydrated || hydrating || typeof window === "undefined") return;
+  hydrating = true;
+  try {
+    const supabase = client();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return; // sem login: fica no seed neutro; o shell manda pro /login
+
+    const fetchMembership = () =>
+      supabase
+        .from("memberships")
+        .select("workspace_id")
+        .eq("user_id", user.id)
+        .limit(1)
+        .maybeSingle();
+
+    let { data: mem } = await fetchMembership();
+    if (!mem) {
+      // conta sem workspace (antiga ou logo após signup): provisiona e tenta de novo
+      try {
+        const r = await fetch("/api/auth/ensure-workspace", { method: "POST" });
+        if (r.ok) ({ data: mem } = await fetchMembership());
+      } catch {
+        // sem rede: segue sem workspace; o shell mostra o estado de erro
+      }
+    }
+    if (!mem) return;
+    workspaceId = String((mem as Row).workspace_id);
+
+    const [wsR, membersR, eventsR, attendeesR, tasksR, attachR, catsR, txR, actR, tplR, setR] =
+      await Promise.all([
+        supabase.from("workspaces").select("*").eq("id", workspaceId).maybeSingle(),
+        supabase.from("members").select("*").order("created_at"),
+        supabase.from("events").select("*").order("created_at", { ascending: false }),
+        supabase.from("attendees").select("*").order("created_at", { ascending: false }),
+        supabase.from("tasks").select("*").order("created_at", { ascending: false }),
+        supabase.from("task_attachments").select("*"),
+        supabase.from("budget_categories").select("*"),
+        supabase.from("transactions").select("*").order("created_at", { ascending: false }),
+        supabase.from("activity").select("*").order("created_at", { ascending: false }).limit(50),
+        supabase.from("checklist_templates").select("*"),
+        supabase.from("app_settings").select("data").eq("workspace_id", workspaceId).maybeSingle(),
+      ]);
+
+    const attByTask = new Map<string, TaskAttachment[]>();
+    for (const r of (attachR.data ?? []) as Row[]) {
+      const key = String(r.task_id);
+      attByTask.set(key, [...(attByTask.get(key) ?? []), map.rowToAttachment(r)]);
+    }
+
+    const memberRows = (membersR.data ?? []) as Row[];
+    const me = memberRows.find((r) => r.profile_id === user.id);
+    const ws = (wsR.data ?? null) as Row | null;
+    const events = (eventsR.data ?? []) as Row[];
+
+    state = {
+      v: SEED_VERSION,
+      session: {
+        user_id: me ? String(me.id) : null,
+        selected_event_id: loadSelectedEvent() ?? (events[0] ? String(events[0].id) : null),
+      },
+      workspace: {
+        id: workspaceId,
+        name: ws ? String(ws.name) : "Workspace",
+        timezone: ws ? String(ws.timezone) : "(GMT-3) São Paulo",
+      },
+      members: memberRows.map(map.rowToMember),
+      events: events.map(map.rowToEvent),
+      attendees: ((attendeesR.data ?? []) as Row[]).map(map.rowToAttendee),
+      tasks: ((tasksR.data ?? []) as Row[]).map((r) => map.rowToTask(r, attByTask.get(String(r.id)))),
+      categories: ((catsR.data ?? []) as Row[]).map(map.rowToCategory),
+      transactions: ((txR.data ?? []) as Row[]).map(map.rowToTransaction),
+      templates: ((tplR.data ?? []) as Row[]).map(map.rowToTemplate),
+      activity: ((actR.data ?? []) as Row[]).map(map.rowToActivity),
+      settings: ((setR.data as Row | null)?.data as AppSettings) ?? { toggles: {} },
+    };
+  } catch (e) {
+    console.error("[db] hidratação falhou:", e);
+  } finally {
+    hydrated = true;
+    hydrating = false;
+    emit();
+  }
+}
+
+/** Força recarregar o workspace do servidor (login, reset). */
+export async function rehydrate() {
+  hydrated = false;
+  hydrating = false;
+  workspaceId = null;
+  await hydrate();
+}
+
+/** Logout: limpa o estado em memória e volta ao seed neutro (o signOut é da UI). */
+export function clearSession() {
+  workspaceId = null;
+  saveSelectedEvent(null);
+  state = seedState();
+  state.session.user_id = null;
+  emit();
+}
+
+/**
+ * Restaura o workspace demo do zero (Config → zona de perigo): apaga os dados
+ * do workspace atual e re-semeia, mantendo o usuário logado como owner.
+ */
+export async function resetDemo() {
+  if (!workspaceId) return;
+  const supabase = client();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return;
+
+  // events em cascata derruba attendees/tasks/task_attachments/transactions.
+  for (const t of ["events", "budget_categories", "members", "activity", "checklist_templates"]) {
+    await supabase.from(t).delete().eq("workspace_id", workspaceId);
+  }
+  await seedWorkspace(
+    supabase as Parameters<typeof seedWorkspace>[0],
+    workspaceId,
+    user.id,
+    displayNameFromUser(user),
+    user.email ?? ""
+  );
+  await rehydrate();
+}
+
+/** Auto-save já roda a cada mutação; mantido para o botão "Salvar" da UI. */
+export function saveNow(): boolean {
+  saveSettings();
+  return true;
 }
 
 export type { DbState };
