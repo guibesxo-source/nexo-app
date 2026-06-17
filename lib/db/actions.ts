@@ -12,6 +12,7 @@ import type {
   DashboardConfig,
   DashboardWidget,
   Event,
+  EventFile,
   EventFormat,
   EventPriority,
   Member,
@@ -1112,6 +1113,67 @@ export function setDayNote(date: string, text: string) {
     if (clean) notes[date] = clean;
     else delete notes[date];
     return { ...s, settings: { ...s.settings, day_notes: notes } };
+  });
+  saveSettings();
+}
+
+/* ---------- Arquivos do evento (mídia kit, fotos, briefing, metas) ---------- */
+
+export type EventFileDraft = Pick<EventFile, "category" | "title"> &
+  Partial<Pick<EventFile, "url" | "file" | "note">>;
+
+/** Mapa event_id -> arquivos, partindo do settings atual. */
+function eventFilesMap(s: { settings: AppSettings }): Record<string, EventFile[]> {
+  return { ...(s.settings.event_files ?? {}) };
+}
+
+export function addEventFile(eventId: string, draft: EventFileDraft): string {
+  const id = newId();
+  const item: EventFile = {
+    id,
+    event_id: eventId,
+    category: draft.category,
+    title: draft.title.trim(),
+    url: draft.url?.trim() || null,
+    file: draft.file ?? null,
+    note: draft.note?.trim() || null,
+    created_at: now(),
+  };
+  mutate((s) => {
+    const map = eventFilesMap(s);
+    map[eventId] = [item, ...(map[eventId] ?? [])];
+    return { ...s, settings: { ...s.settings, event_files: map } };
+  });
+  saveSettings();
+  logActivity("📎", ["", item.title, " adicionado aos arquivos do evento"]);
+  return id;
+}
+
+export function updateEventFile(eventId: string, id: string, patch: Partial<EventFileDraft>) {
+  mutate((s) => {
+    const map = eventFilesMap(s);
+    map[eventId] = (map[eventId] ?? []).map((f) =>
+      f.id === id
+        ? {
+            ...f,
+            ...(patch.category !== undefined ? { category: patch.category } : {}),
+            ...(patch.title !== undefined ? { title: patch.title.trim() } : {}),
+            ...("url" in patch ? { url: patch.url?.trim() || null } : {}),
+            ...("file" in patch ? { file: patch.file ?? null } : {}),
+            ...("note" in patch ? { note: patch.note?.trim() || null } : {}),
+          }
+        : f
+    );
+    return { ...s, settings: { ...s.settings, event_files: map } };
+  });
+  saveSettings();
+}
+
+export function removeEventFile(eventId: string, id: string) {
+  mutate((s) => {
+    const map = eventFilesMap(s);
+    if (map[eventId]) map[eventId] = map[eventId].filter((f) => f.id !== id);
+    return { ...s, settings: { ...s.settings, event_files: map } };
   });
   saveSettings();
 }

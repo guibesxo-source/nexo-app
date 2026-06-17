@@ -52,6 +52,7 @@ export const ROUTES: Record<string, string> = {
   inscritos: "/inscritos",
   financeiro: "/financeiro",
   checklist: "/checklist",
+  arquivos: "/arquivos",
   membros: "/membros",
   integracoes: "/integracoes",
   config: "/config",
@@ -60,7 +61,7 @@ export const ROUTES: Record<string, string> = {
 const CRUMBS: Record<string, string> = {
   dashboard: "Dashboard", eventos: "Eventos", calendario: "Calendário",
   inscritos: "Inscritos", financeiro: "Financeiro", checklist: "Checklist",
-  membros: "Membros", integracoes: "APIs & Integrações", config: "Configurações",
+  arquivos: "Arquivos", membros: "Membros", integracoes: "APIs & Integrações", config: "Configurações",
 };
 
 function routeIdFromPath(pathname: string): string {
@@ -159,6 +160,7 @@ function Sidebar({ active, onNav, open, collapsed, onToggleCollapse }: {
       count: counts.lateTasks > 0 ? counts.lateTasks : counts.openTasks,
       warn: counts.lateTasks > 0,
     },
+    { id: "arquivos", label: "Arquivos", icon: "paperclip", count: 0, warn: false },
   ];
   const nav2 = [
     { id: "membros", label: "Membros", icon: "team" },

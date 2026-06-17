@@ -6,6 +6,7 @@ import { useRef, useState } from "react";
 import {
   Badge, Card, Donut, Empty, Field, Icon, Kpi, Menu, Modal, MoneyInput, PageHead, useToast,
 } from "@/components/app/kit";
+import { CostPanel } from "@/components/app/cost-panel";
 import {
   addTransaction,
   categoryById,
@@ -402,6 +403,76 @@ function PropostoRealizado({ budget, spent, income, txs }: {
   );
 }
 
+/* ---------- modal: resumo de um KPI (despesas / receitas / pendente) ---------- */
+
+type FinanceDetailKind = "despesas" | "receitas" | "pendente";
+
+const FINANCE_DETAIL_META: Record<FinanceDetailKind, { title: string; desc: string }> = {
+  despesas: { title: "Total de despesas", desc: "Tudo que saiu do caixa do evento." },
+  receitas: { title: "Receitas", desc: "Tudo que entrou — patrocínios, vendas e repasses." },
+  pendente: { title: "Pendente de pagamento", desc: "Despesas registradas e ainda não pagas." },
+};
+
+function FinanceDetailModal({ kind, txs, db, onClose }: {
+  kind: FinanceDetailKind;
+  txs: Transaction[];
+  db: ReturnType<typeof useDb>;
+  onClose: () => void;
+}) {
+  const meta = FINANCE_DETAIL_META[kind];
+  const isIn = kind === "receitas";
+  const list = (
+    kind === "receitas"
+      ? txs.filter((t) => t.kind === "entrada")
+      : kind === "pendente"
+        ? txs.filter((t) => t.kind === "saida" && t.payment_status === "pendente")
+        : txs.filter((t) => t.kind === "saida")
+  )
+    .slice()
+    .sort((a, b) => b.amount - a.amount);
+  const total = list.reduce((sum, t) => sum + t.amount, 0);
+
+  return (
+    <Modal
+      title={meta.title}
+      onClose={onClose}
+      width={560}
+      footer={<button className="btn" onClick={onClose}>Fechar</button>}
+    >
+      <div className="fd-summary">
+        <div className="fd-sum-main">
+          <div className="fd-sum-lbl">{meta.desc}</div>
+          <div className={"fd-sum-val" + (isIn ? " in" : "")}>{fmtMoney(total)}</div>
+        </div>
+        <span className="fd-sum-count">{list.length} lançamento{list.length === 1 ? "" : "s"}</span>
+      </div>
+      {list.length === 0 ? (
+        <Empty icon="wallet" title="Nada por aqui" sub="Nenhum lançamento neste grupo ainda." />
+      ) : (
+        <div className="fd-list">
+          {list.map((t) => {
+            const cat = categoryById(db, t.category_id);
+            const pay = PAYMENT_META[t.payment_status] ?? { tone: "gray", label: t.payment_status };
+            return (
+              <div className="fd-row" key={t.id}>
+                <span className="fd-ic">{cat?.icon ?? (isIn ? "💰" : "💳")}</span>
+                <span className="fd-main">
+                  <span className="fd-nm">{t.description}</span>
+                  <span className="fd-meta">{[cat?.name, fmtDateShort(t.occurred_on)].filter(Boolean).join(" · ")}</span>
+                </span>
+                <span className="fd-amt">
+                  <span className={"fd-v" + (isIn ? " in" : "")}>{isIn ? "+" : "−"}{fmtMoney(t.amount)}</span>
+                  <Badge tone={pay.tone}>{pay.label}</Badge>
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 export function Financeiro() {
   const db = useDb();
   const toast = useToast();
@@ -412,6 +483,7 @@ export function Financeiro() {
   const [adding, setAdding] = useState(false);
   const [editingTx, setEditingTx] = useState<Transaction | null>(null);
   const [editingBudget, setEditingBudget] = useState(false);
+  const [detail, setDetail] = useState<FinanceDetailKind | null>(null);
 
   const ev = selectedEvent(db);
 
@@ -477,6 +549,21 @@ export function Financeiro() {
   const inCount = txs.filter((t) => t.kind === "entrada").length;
   const pendingCount = txs.filter((t) => t.kind === "saida" && t.payment_status === "pendente").length;
 
+  // Análise orçamento × custos × receitas para o hero.
+  const budget = ev.budget_planned;
+  const net = k.income - k.spent;
+  const coverage = k.spent ? Math.round((k.income / k.spent) * 100) : k.income > 0 ? 100 : 0;
+  const finMax = Math.max(budget, k.spent, k.income, 1);
+  const finPct = (v: number) => (v <= 0 ? 0 : Math.max(3, Math.round((v / finMax) * 100)));
+  const finNote =
+    budget > 0 && k.spent > budget
+      ? { tone: "warn", text: `Estourou o orçamento em ${fmtMoney(k.spent - budget)}` }
+      : k.income <= 0
+        ? { tone: "info", text: `Sem receitas ainda · ${fmtMoney(Math.max(0, k.available))} do orçamento livres` }
+        : net >= 0
+          ? { tone: "pos", text: `Receitas cobrem os custos · resultado +${fmtMoney(net)}` }
+          : { tone: "warn", text: `Receitas cobrem ${coverage}% dos custos · faltam ${fmtMoney(-net)}` };
+
   const exportCsv = () => {
     const csv = toCsv(
       ["Data", "Descrição", "Categoria", "Tipo", "Valor", "Pagamento", "NF"],
@@ -538,9 +625,31 @@ export function Financeiro() {
             </span>
           </div>
           <div className="sub">
-            {k.budgetPct}% do orçamento · {fmtMoney(k.available)} disponível
+            {k.budgetPct}% do orçamento · {fmtMoney(Math.abs(k.available))} {k.available >= 0 ? "disponível" : "acima do previsto"}
           </div>
-          <div className="bbar"><i style={{ width: Math.min(100, k.budgetPct) + "%" }} /></div>
+          <div className="bc-bars">
+            <div className="bc-bar-row">
+              <span className="bc-bk">Orçamento</span>
+              <span className="bc-track"><i className="bud" style={{ width: finPct(budget) + "%" }} /></span>
+              <span className="bc-bv">{fmtMoney(budget)}</span>
+            </div>
+            <div className="bc-bar-row">
+              <span className="bc-bk">Custos</span>
+              <span className="bc-track">
+                <i className={"cost" + (budget > 0 && k.spent > budget ? " over" : "")} style={{ width: finPct(k.spent) + "%" }} />
+              </span>
+              <span className="bc-bv">{fmtMoney(k.spent)}</span>
+            </div>
+            <div className="bc-bar-row">
+              <span className="bc-bk">Receitas</span>
+              <span className="bc-track"><i className="rev" style={{ width: finPct(k.income) + "%" }} /></span>
+              <span className="bc-bv">{fmtMoney(k.income)}</span>
+            </div>
+          </div>
+          <div className={"bc-note " + finNote.tone}>
+            <Icon name="bolt" size={14} />
+            <span>{finNote.text}</span>
+          </div>
           <button
             className="btn btn-sm"
             style={{ marginTop: 16, position: "relative", zIndex: 1 }}
@@ -549,17 +658,34 @@ export function Financeiro() {
             Editar orçamento
           </button>
         </div>
-        <Card title="Por categoria">
+        <Card
+          title="Por categoria"
+          actions={
+            cats.length > 0 ? (
+              <span className="card-link">{fmtMoney(k.spent)} · {outCount} lançamento{outCount === 1 ? "" : "s"}</span>
+            ) : undefined
+          }
+        >
           {cats.length === 0 ? (
             <Empty icon="wallet" title="Sem despesas ainda" sub="Os gastos por categoria aparecem aqui." />
           ) : (
-            cats.map((c) => (
-              <div className="cat-row" key={c.id}>
-                <span className="nm">{c.name}</span>
-                <span className="vl">{fmtMoney(c.value)}</span>
-                <div className="bar"><i style={{ width: c.pct + "%", background: "var(--green)" }} /></div>
-              </div>
-            ))
+            <div className="catx-list">
+              {cats.map((c) => (
+                <div className="catx-row" key={c.id}>
+                  <span className="catx-ic">{c.icon}</span>
+                  <span className="catx-main">
+                    <span className="catx-top">
+                      <span className="catx-nm">{c.name}</span>
+                      <span className="catx-vl">{fmtMoney(c.value)}</span>
+                    </span>
+                    <span className="catx-bar"><i style={{ width: Math.max(3, c.share) + "%" }} /></span>
+                    <span className="catx-sub">
+                      {c.share}% do gasto · {c.count} lançamento{c.count === 1 ? "" : "s"}
+                    </span>
+                  </span>
+                </div>
+              ))}
+            </div>
           )}
         </Card>
       </div>
@@ -573,6 +699,7 @@ export function Financeiro() {
           label="Total de despesas"
           delta={`${outCount} lançamento${outCount === 1 ? "" : "s"}`}
           deltaDir="flat"
+          onClick={() => setDetail("despesas")}
         />
         <Kpi
           icon="arrowUp" iconTone="green"
@@ -580,6 +707,7 @@ export function Financeiro() {
           label="Receitas"
           delta={`${inCount} lançamento${inCount === 1 ? "" : "s"}`}
           deltaDir={inCount > 0 ? "up" : "flat"}
+          onClick={() => setDetail("receitas")}
         />
         <Kpi
           icon="clock"
@@ -587,8 +715,13 @@ export function Financeiro() {
           label="Pendente de pagamento"
           delta={`${pendingCount} lançamento${pendingCount === 1 ? "" : "s"}`}
           deltaDir="flat"
+          onClick={() => setDetail("pendente")}
         />
       </div>
+
+      <Card title="Custo por inscrito" style={{ marginTop: 4 }}>
+        <CostPanel k={k} capacity={ev.capacity} />
+      </Card>
 
       <Card pad0 style={{ marginTop: 4 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 20px 14px", borderBottom: "1px solid var(--line)" }}>
@@ -686,6 +819,9 @@ export function Financeiro() {
       )}
       {editingBudget && (
         <BudgetModal eventId={ev.id} current={ev.budget_planned} onClose={() => setEditingBudget(false)} />
+      )}
+      {detail && (
+        <FinanceDetailModal kind={detail} txs={txs} db={db} onClose={() => setDetail(null)} />
       )}
     </div>
   );

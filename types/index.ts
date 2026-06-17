@@ -179,6 +179,8 @@ export type DashboardWidgetType =
   | "chart-signups"
   | "chart-confirm"
   | "chart-category"
+  | "block-cost"
+  | "list-insights"
   | "list-activity"
   | "list-progress";
 
@@ -189,6 +191,11 @@ export type DashboardWidget = {
   metric?: string;
   /** Largura em colunas numa grade de 4 (1–4). */
   span?: number;
+  /**
+   * Para "kpi": chaves de métricas (catálogo ou custom) exibidas como mini
+   * estatísticas na lateral do card, ao lado do número principal. Até 3.
+   */
+  sideMetrics?: string[];
 };
 
 export type CustomMetricSource = "inscritos" | "financeiro" | "checklist";
@@ -224,6 +231,23 @@ export type SymplaEventLink = {
   field_keys?: string[];
 };
 
+export type EventFileCategory = "midia-kit" | "fotos" | "briefing" | "metas" | "documento" | "outro";
+
+/** Arquivo/recurso de um evento: um link na nuvem (Drive, Dropbox, Figma…) ou
+   um upload pequeno (data URL). Persistido no blob de settings (app_settings). */
+export type EventFile = {
+  id: string;
+  event_id: string;
+  category: EventFileCategory;
+  title: string;
+  /** Link na nuvem do arquivo (preferido). */
+  url?: string | null;
+  /** Upload pequeno embutido (nome + data URL), alternativa ao link. */
+  file?: { name: string; data: string } | null;
+  note?: string | null;
+  created_at: string;
+};
+
 export type AppSettings = {
   toggles: Record<string, boolean>;
   /** Token da API pública do Sympla (integração de importação de inscritos). */
@@ -244,6 +268,8 @@ export type AppSettings = {
   recent_searches?: string[];
   /** Notas do usuário por dia no calendário (chave = "YYYY-MM-DD"). */
   day_notes?: Record<string, string>;
+  /** Arquivos/recursos por evento (mídia kit, fotos, briefing, metas) — chave = event_id. */
+  event_files?: Record<string, EventFile[]>;
 };
 
 export type Session = {

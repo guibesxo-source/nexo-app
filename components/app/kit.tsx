@@ -214,26 +214,64 @@ export function Card({ title, link, onLink, actions, children, pad0, style }: {
 }
 
 /* ---------- KPI ---------- */
-export function Kpi({ icon, iconTone, value, label, delta, deltaDir }: {
+export type KpiSideStat = { icon: string; value: ReactNode; label: ReactNode; tone?: string };
+
+export function Kpi({ icon, iconTone, value, label, delta, deltaDir, side, foot, onClick }: {
   icon: string; iconTone?: string; value: ReactNode; label: ReactNode;
   delta?: ReactNode; deltaDir?: "up" | "down" | "flat";
+  /** Mini estatísticas exibidas na lateral do card. */
+  side?: KpiSideStat[];
+  /** Insight contextual no rodapé do card (preenche o espaço e muda com a performance). */
+  foot?: { text: ReactNode; tone?: string };
+  /** Torna o card clicável (abre um detalhe/resumo). */
+  onClick?: () => void;
 }) {
+  const hasSides = !!side && side.length > 0;
   return (
-    <div className="kpi">
-      <div className="kpi-top">
-        <span className={"kpi-ic" + (iconTone ? " " + iconTone : "")}>
-          <Icon name={icon} />
-        </span>
-        {delta && (
-          <span className={"kpi-delta " + (deltaDir || "flat")}>
-            {deltaDir === "up" && <Icon name="arrowUp" size={13} />}
-            {deltaDir === "down" && <Icon name="arrowDown" size={13} />}
-            {delta}
+    <div
+      className={"kpi" + (hasSides ? " has-sides" : "") + (onClick ? " kpi-click" : "")}
+      onClick={onClick}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } } : undefined}
+    >
+      <div className="kpi-main">
+        <div className="kpi-top">
+          <span className={"kpi-ic" + (iconTone ? " " + iconTone : "")}>
+            <Icon name={icon} />
           </span>
+          {delta && (
+            <span className={"kpi-delta " + (deltaDir || "flat")}>
+              {deltaDir === "up" && <Icon name="arrowUp" size={13} />}
+              {deltaDir === "down" && <Icon name="arrowDown" size={13} />}
+              {delta}
+            </span>
+          )}
+        </div>
+        <div className="kpi-val">{value}</div>
+        <div className="kpi-lbl">{label}</div>
+        {foot && (
+          <div className={"kpi-foot" + (foot.tone ? " " + foot.tone : "")}>
+            <span className="dot" />{foot.text}
+          </div>
         )}
       </div>
-      <div className="kpi-val">{value}</div>
-      <div className="kpi-lbl">{label}</div>
+      {hasSides && (
+        <div className="kpi-sides">
+          {side!.map((s, i) => (
+            <div className="kpi-side" key={i}>
+              <span className={"kpi-side-ic" + (s.tone ? " " + s.tone : "")}>
+                <Icon name={s.icon} size={15} />
+              </span>
+              <span className="kpi-side-meta">
+                <span className="kpi-side-val">{s.value}</span>
+                <span className="kpi-side-lbl">{s.label}</span>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      {onClick && <span className="kpi-expand"><Icon name="chevRight" size={15} /></span>}
     </div>
   );
 }
@@ -241,25 +279,32 @@ export function Kpi({ icon, iconTone, value, label, delta, deltaDir }: {
 /* ---------- Bar chart ---------- */
 export function BarChart({ data, lastAlt }: { data: { l: string; v: number }[]; lastAlt?: boolean }) {
   const max = Math.max(...data.map((d) => d.v), 1);
+  // Com muitas barras (ex.: histórico dia a dia), rareia os rótulos para não
+  // empilhar texto e aproxima as colunas.
+  const dense = data.length > 16;
+  const step = dense ? Math.ceil(data.length / 12) : 1;
   return (
-    <div className="bars">
-      {data.map((d, i) => (
-        <div className="col" key={i}>
-          <div className="b-track">
-            <div
-              className={
-                "b" +
-                (lastAlt && i === data.length - 1 ? " alt" : "") +
-                (d.v === 0 ? " zero" : "")
-              }
-              style={{ height: d.v === 0 ? 0 : (d.v / max) * 100 + "%" }}
-            >
-              <span className="bval">{d.v}</span>
+    <div className={"bars" + (dense ? " dense" : "")}>
+      {data.map((d, i) => {
+        const showLabel = i % step === 0 || i === data.length - 1;
+        return (
+          <div className="col" key={i}>
+            <div className="b-track">
+              <div
+                className={
+                  "b" +
+                  (lastAlt && i === data.length - 1 ? " alt" : "") +
+                  (d.v === 0 ? " zero" : "")
+                }
+                style={{ height: d.v === 0 ? 0 : (d.v / max) * 100 + "%" }}
+              >
+                <span className="bval">{d.v}</span>
+              </div>
             </div>
+            <div className="cl">{showLabel ? d.l : " "}</div>
           </div>
-          <div className="cl">{d.l}</div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

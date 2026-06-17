@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import {
   BarChart, Card, Donut, Empty, Field, Icon, Kpi, Modal, PageHead, useToast,
 } from "@/components/app/kit";
+import { CostPanel } from "@/components/app/cost-panel";
 import { useGo, useUi } from "@/components/app/shell";
 import { ImportAttendeesModal } from "@/components/app/import-attendees";
 import { useSymplaAutoSync } from "@/components/app/sympla-sync";
@@ -19,15 +20,19 @@ import {
   customMetricValue,
   dashboardConfig,
   eventById,
+  eventInsights,
   eventKpis,
+  firstSignupDate,
   formatMetricValue,
   METRIC_CATALOG,
+  metricInsight,
   removeCustomMetric,
   removeDashboardWidget,
   reorderDashboard,
   resetDashboard,
   selectedEvent,
   signupsByDate,
+  signupsPerDay,
   updateDashboardWidget,
   useDb,
   type EventKpis,
@@ -47,6 +52,8 @@ const BLOCKS: { type: DashboardWidgetType; label: string; icon: string; desc: st
   { type: "chart-signups", label: "Inscritos por data", icon: "trending", desc: "Gráfico de novas inscrições" },
   { type: "chart-confirm", label: "Confirmação", icon: "users", desc: "Donut de confirmados x pendentes" },
   { type: "chart-category", label: "Gastos por categoria", icon: "wallet", desc: "Ranking de despesas do evento" },
+  { type: "block-cost", label: "Custo por inscrito", icon: "wallet", desc: "Custo, receita e resultado por inscrito" },
+  { type: "list-insights", label: "Insights do evento", icon: "bolt", desc: "Alertas que mudam com a performance" },
   { type: "list-activity", label: "Atividade recente", icon: "bell", desc: "Últimas ações do workspace" },
   { type: "list-progress", label: "Progresso por área", icon: "checkSquare", desc: "Captação, orçamento, checklist" },
 ];
@@ -73,6 +80,13 @@ const FILTERS: Record<CustomMetricSource, { v: string; l: string }[]> = {
 
 const defaultFilter = (s: CustomMetricSource) => (s === "checklist" ? "todas" : "todos");
 
+/** Atalhos de período do gráfico de inscritos (janela terminando hoje). */
+const SIGNUP_PRESETS: { label: string; days: number }[] = [
+  { label: "1 semana", days: 7 },
+  { label: "1 mês", days: 30 },
+  { label: "3 meses", days: 90 },
+];
+
 const dateOnly = (date: Date) =>
   [
     date.getFullYear(),
@@ -94,48 +108,67 @@ function defaultWidgetSpan(type: DashboardWidgetType): number {
   return 2;
 }
 
-function baseWidgetSpan(w: DashboardWidget, cols: number, editing: boolean): number {
-  const configured = Math.min(cols, Math.max(1, w.span ?? defaultWidgetSpan(w.type)));
-  if (editing) return configured;
-  if (cols >= 4 && w.type === "chart-confirm" && configured <= 2) return 1;
-  if (cols >= 4 && w.type === "chart-signups" && configured <= 2) return 2;
-  return configured;
+const isKpiWidget = (w: DashboardWidget) => w.type === "kpi";
+
+/** Largura base do widget (1–cols), partindo da configurada ou do padrão. */
+const widgetBaseSpan = (w: DashboardWidget, cols: number) =>
+  Math.min(cols, Math.max(1, w.span ?? defaultWidgetSpan(w.type)));
+
+/** Próxima largura ao clicar no controle: KPI alterna ¼↔½; blocos ½→¾→1→½. */
+function nextWidgetSpan(w: DashboardWidget): number {
+  const cur = w.span ?? defaultWidgetSpan(w.type);
+  if (isKpiWidget(w)) return cur >= 2 ? 1 : 2;
+  return cur >= 4 ? 2 : cur + 1;
 }
 
-function canGrowWidget(w: DashboardWidget): boolean {
-  return w.type !== "kpi" && w.type !== "chart-confirm";
-}
+const SPAN_LABEL: Record<number, string> = { 1: "¼", 2: "½", 3: "¾", 4: "1" };
 
-function layoutWidgets(widgets: DashboardWidget[], cols: number, editing: boolean) {
+/**
+ * Distribui os widgets numa grade de `cols` colunas SEMPRE preenchendo cada
+ * linha por inteiro (sem buracos) e com resultado idêntico em edição e
+ * visualização (WYSIWYG — o que você dimensiona é o que aparece). KPIs e blocos
+ * não dividem a mesma linha (alturas muito diferentes deixavam KPIs gigantes ou
+ * vazios) e KPIs ficam no máximo com 2 colunas, exceto quando sozinhos na linha.
+ */
+function layoutWidgets(widgets: DashboardWidget[], cols: number): { widget: DashboardWidget; span: number }[] {
+  const items = widgets.map((w) => ({ widget: w, base: widgetBaseSpan(w, cols), kpi: isKpiWidget(w) }));
   const out: { widget: DashboardWidget; span: number }[] = [];
-  let row: { widget: DashboardWidget; span: number }[] = [];
-  let used = 0;
+  let row: typeof items = [];
 
   const flush = () => {
     if (!row.length) return;
-    let remaining = cols - row.reduce((sum, item) => sum + item.span, 0);
-    while (!editing && remaining > 0) {
+    const spans = row.map((it) => it.base);
+    const cap = (i: number) => (row[i].kpi && row.length > 1 ? 2 : cols);
+    let leftover = cols - spans.reduce((a, b) => a + b, 0);
+    let guard = cols * row.length + 1;
+    while (leftover > 0 && guard-- > 0) {
       let changed = false;
-      for (const item of row) {
-        const growable = canGrowWidget(item.widget) || row.length === 1;
-        if (!growable || item.span >= cols || remaining <= 0) continue;
-        item.span += 1;
-        remaining -= 1;
-        changed = true;
+      for (let i = 0; i < row.length && leftover > 0; i++) {
+        if (spans[i] < cap(i)) {
+          spans[i] += 1;
+          leftover -= 1;
+          changed = true;
+        }
       }
       if (!changed) break;
     }
-    out.push(...row);
+    row.forEach((it, i) => out.push({ widget: it.widget, span: spans[i] }));
     row = [];
-    used = 0;
   };
 
-  for (const widget of widgets) {
-    const span = baseWidgetSpan(widget, cols, editing);
-    if (row.length && used + span > cols) flush();
-    row.push({ widget, span });
-    used += span;
-    if (used >= cols) flush();
+  let used = 0;
+  for (const it of items) {
+    const kindBreak = row.length > 0 && row[0].kpi !== it.kpi;
+    if (kindBreak || (row.length > 0 && used + it.base > cols)) {
+      flush();
+      used = 0;
+    }
+    row.push(it);
+    used += it.base;
+    if (used >= cols) {
+      flush();
+      used = 0;
+    }
   }
   flush();
   return out;
@@ -341,6 +374,84 @@ function AddWidgetModal({ eventId, cfg, k, onClose }: {
   );
 }
 
+/* ---------- modal: estatísticas laterais de um KPI ---------- */
+
+const MAX_SIDE_METRICS = 3;
+
+function SideMetricsModal({ eventId, cfg, k, widget, onClose }: {
+  eventId: string;
+  cfg: DashboardConfig;
+  k: EventKpis;
+  widget: DashboardWidget;
+  onClose: () => void;
+}) {
+  const db = useDb();
+  const toast = useToast();
+  const selected = widget.sideMetrics ?? [];
+  const mainKey = widget.metric ?? "";
+  const mainLabel =
+    catalogMetric(mainKey)?.label ?? cfg.customMetrics.find((m) => m.id === mainKey)?.label ?? "esta métrica";
+
+  // Opções: catálogo + métricas personalizadas, menos a métrica principal do card.
+  const options = [
+    ...METRIC_CATALOG.map((m) => ({
+      key: m.key, label: m.label, icon: m.icon, value: formatMetricValue(m.value(k), m.format),
+    })),
+    ...cfg.customMetrics.map((m) => ({
+      key: m.id, label: m.label, icon: m.icon ?? "sparkle",
+      value: formatMetricValue(customMetricValue(db, eventId, m), m.format ?? "number"),
+    })),
+  ].filter((o) => o.key !== mainKey);
+
+  const toggle = (key: string) => {
+    const on = selected.includes(key);
+    if (!on && selected.length >= MAX_SIDE_METRICS) {
+      toast(`Até ${MAX_SIDE_METRICS} estatísticas na lateral`);
+      return;
+    }
+    const next = on ? selected.filter((s) => s !== key) : [...selected, key];
+    const patch: Partial<Omit<DashboardWidget, "id">> = { sideMetrics: next };
+    // ao ganhar a primeira lateral, garante largura para o número + as mini stats
+    if (next.length > 0 && (widget.span ?? 1) < 2) patch.span = 2;
+    updateDashboardWidget(widget.id, patch);
+  };
+
+  return (
+    <Modal
+      title="Estatísticas laterais"
+      onClose={onClose}
+      width={560}
+      footer={<button className="btn btn-primary" onClick={onClose}>Concluir</button>}
+    >
+      <div className="import-summary" style={{ marginBottom: 16 }}>
+        <Icon name="panelLeft" size={15} />
+        <span>
+          Escolha as mini estatísticas ao lado de <b>{mainLabel}</b> · {selected.length}/{MAX_SIDE_METRICS}
+        </span>
+      </div>
+      <div className="aw-grid">
+        {options.map((o) => {
+          const on = selected.includes(o.key);
+          return (
+            <button
+              key={o.key}
+              className={"aw-item" + (on ? " is-on" : "")}
+              onClick={() => toggle(o.key)}
+            >
+              <span className="aw-ic"><Icon name={o.icon} size={17} /></span>
+              <span className="aw-meta">
+                <span className="aw-nm">{o.label}</span>
+                <span className="aw-val">{o.value}</span>
+              </span>
+              <Icon name={on ? "check" : "plus"} size={15} />
+            </button>
+          );
+        })}
+      </div>
+    </Modal>
+  );
+}
+
 /* ---------- view ---------- */
 
 export function Dashboard({ eventId }: { eventId?: string }) {
@@ -352,6 +463,7 @@ export function Dashboard({ eventId }: { eventId?: string }) {
   const [editing, setEditing] = useState(false);
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [sideEditId, setSideEditId] = useState<string | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
   const [signupFrom, setSignupFrom] = useState("");
@@ -363,8 +475,8 @@ export function Dashboard({ eventId }: { eventId?: string }) {
   const symplaSync = useSymplaAutoSync(ev?.id ?? null);
   const cfg = dashboardConfig(db);
   const responsiveWidgets = useMemo(
-    () => layoutWidgets(cfg.widgets, cols, editing),
-    [cfg.widgets, cols, editing]
+    () => layoutWidgets(cfg.widgets, cols),
+    [cfg.widgets, cols]
   );
 
   useEffect(() => {
@@ -400,15 +512,40 @@ export function Dashboard({ eventId }: { eventId?: string }) {
   }
 
   const k = eventKpis(db, ev.id);
-  const signups = signupsByDate(db, ev.id, {
-    from: signupFrom || undefined,
-    to: signupTo || undefined,
-    days: 14,
-  });
+  const insights = eventInsights(db, ev.id);
   const today = dateOnly(new Date());
+  const hasSignupFilter = !!signupFrom || !!signupTo;
+  // "Desde o início": janela a partir do primeiro inscrito (cai no início do evento).
+  const eventStartDate =
+    firstSignupDate(db, ev.id) ?? (ev.created_at ? dateOnly(new Date(ev.created_at)) : today);
+  const isSinceStart = signupTo === today && signupFrom === eventStartDate;
+  // Gráfico: "desde o início" mostra uma barra por dia que teve inscritos (histórico
+  // completo, dia a dia); nas outras janelas, o agrupamento automático (dia/semana).
+  const signups = isSinceStart
+    ? signupsPerDay(db, ev.id, { from: signupFrom, to: signupTo })
+    : signupsByDate(db, ev.id, { from: signupFrom || undefined, to: signupTo || undefined, days: 14 });
   const signupToday = signupsByDate(db, ev.id, { from: today, to: today }).reduce((sum, item) => sum + item.v, 0);
   const signupTotal = signups.reduce((sum, item) => sum + item.v, 0);
-  const hasSignupFilter = !!signupFrom || !!signupTo;
+  // Atalhos de período: definem De/Até como uma janela que termina hoje.
+  const applySignupPreset = (rangeDays: number) => {
+    const from = new Date(today + "T00:00:00");
+    from.setDate(from.getDate() - (rangeDays - 1));
+    setSignupFrom(dateOnly(from));
+    setSignupTo(today);
+    setSignupPickerOpen(false);
+  };
+  const activeSignupPreset = (() => {
+    if (signupTo !== today || !signupFrom) return null;
+    const fromMs = new Date(signupFrom + "T00:00:00").getTime();
+    const toMs = new Date(today + "T00:00:00").getTime();
+    if (Number.isNaN(fromMs) || Number.isNaN(toMs)) return null;
+    return Math.round((toMs - fromMs) / 86400000) + 1;
+  })();
+  const applySinceStart = () => {
+    setSignupFrom(eventStartDate);
+    setSignupTo(today);
+    setSignupPickerOpen(false);
+  };
   const cats = categoryTotals(db, ev.id);
   const days = daysUntil(ev.starts_at);
   const checklistPct = k.tasksTotal ? Math.round((k.tasksDone / k.tasksTotal) * 100) : 0;
@@ -430,8 +567,8 @@ export function Dashboard({ eventId }: { eventId?: string }) {
     setOverId(null);
   };
 
-  const resolveKpi = (w: DashboardWidget) => {
-    const key = w.metric ?? "";
+  /** Resolve qualquer chave de métrica (catálogo ou custom) em dados de exibição. */
+  const resolveMetric = (key: string) => {
     const cat = catalogMetric(key);
     if (cat) {
       return { icon: cat.icon, tone: cat.tone, label: cat.label, value: formatMetricValue(cat.value(k), cat.format) };
@@ -443,14 +580,23 @@ export function Dashboard({ eventId }: { eventId?: string }) {
         value: formatMetricValue(customMetricValue(db, ev.id, cm), cm.format ?? "number"),
       };
     }
-    return { icon: "sparkle", tone: undefined as string | undefined, label: "Métrica removida", value: "—" };
+    return null;
   };
+
+  const resolveKpi = (w: DashboardWidget) =>
+    resolveMetric(w.metric ?? "") ??
+    { icon: "sparkle", tone: undefined as string | undefined, label: "Métrica removida", value: "—" };
 
   const renderWidget = (w: DashboardWidget) => {
     switch (w.type) {
       case "kpi": {
         const r = resolveKpi(w);
-        return <Kpi icon={r.icon} iconTone={r.tone} value={r.value} label={r.label} />;
+        const side = (w.sideMetrics ?? [])
+          .map((key) => resolveMetric(key))
+          .filter((m): m is NonNullable<typeof m> => !!m)
+          .map((m) => ({ icon: m.icon, tone: m.tone, value: m.value, label: m.label }));
+        const foot = w.metric ? metricInsight(w.metric, k, ev) : null;
+        return <Kpi icon={r.icon} iconTone={r.tone} value={r.value} label={r.label} side={side} foot={foot ?? undefined} />;
       }
       case "chart-signups":
         return (
@@ -475,6 +621,25 @@ export function Dashboard({ eventId }: { eventId?: string }) {
                   <>
                     <span className="dash-calendar-scrim" onClick={() => setSignupPickerOpen(false)} />
                     <div className="dash-calendar-pop" onClick={(e) => e.stopPropagation()}>
+                      <div className="dash-calendar-presets">
+                        {SIGNUP_PRESETS.map((p) => (
+                          <button
+                            key={p.days}
+                            type="button"
+                            className={"chip" + (!isSinceStart && activeSignupPreset === p.days ? " active" : "")}
+                            onClick={() => applySignupPreset(p.days)}
+                          >
+                            {p.label}
+                          </button>
+                        ))}
+                        <button
+                          type="button"
+                          className={"chip" + (isSinceStart ? " active" : "")}
+                          onClick={applySinceStart}
+                        >
+                          Desde o início
+                        </button>
+                      </div>
                       <label className="dash-date-field">
                         <span>De</span>
                         <input
@@ -520,8 +685,28 @@ export function Dashboard({ eventId }: { eventId?: string }) {
               </div>
             }
           >
-            <div className="dash-chart-total">
-              <b>{signupToday}</b> hoje · <b>{signupTotal}</b> no periodo
+            <div className="dash-chart-meta">
+              <div className="dash-chart-total">
+                <b>{signupToday}</b> hoje · <b>{signupTotal}</b> no periodo
+              </div>
+              {k.goal > 0 && (
+                <div
+                  className={
+                    "dash-chart-goal" +
+                    (k.remainingSeats <= 0 ? " ok" : k.neededPerDay <= 0 ? " warn" : "")
+                  }
+                  title={`Meta de ${k.goal} inscritos`}
+                >
+                  <Icon name="trending" size={13} />
+                  {k.remainingSeats <= 0 ? (
+                    <span>Meta de {k.goal} atingida</span>
+                  ) : k.neededPerDay > 0 ? (
+                    <span><b>{k.neededPerDay}</b>/dia p/ meta · {k.remainingSeats} em {k.daysToEvent}d</span>
+                  ) : (
+                    <span>Faltam {k.remainingSeats} p/ meta</span>
+                  )}
+                </div>
+              )}
             </div>
             <BarChart data={signups} />
           </Card>
@@ -537,6 +722,29 @@ export function Dashboard({ eventId }: { eventId?: string }) {
                 { color: "#E8E8E5", label: "Pendentes", value: String(k.pending) },
               ]}
             />
+          </Card>
+        );
+      case "block-cost":
+        return (
+          <Card title="Custo por inscrito">
+            <CostPanel k={k} capacity={ev.capacity} />
+          </Card>
+        );
+      case "list-insights":
+        return (
+          <Card title="Insights do evento">
+            {insights.length === 0 ? (
+              <Empty icon="bolt" title="Sem destaques agora" sub="Os alertas de performance aparecem aqui conforme o evento avança." />
+            ) : (
+              <div className="insights">
+                {insights.map((it, i) => (
+                  <div className="insight-row" key={i}>
+                    <span className={"insight-ic " + it.tone}><Icon name={it.icon} size={15} /></span>
+                    <span className="insight-tx">{it.text}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </Card>
         );
       case "chart-category":
@@ -704,19 +912,21 @@ export function Dashboard({ eventId }: { eventId?: string }) {
               {editing && (
                 <div className="dash-tools">
                   <span className="dash-grip" title="Arraste para reordenar"><Icon name="grip" size={15} /></span>
+                  {w.type === "kpi" && (
+                    <button
+                      className="dash-tool"
+                      title="Estatísticas laterais"
+                      onClick={() => setSideEditId(w.id)}
+                    >
+                      <Icon name="panelLeft" size={15} />
+                    </button>
+                  )}
                   <button
                     className="dash-tool"
                     title="Alternar largura"
-                    onClick={() =>
-                      updateDashboardWidget(
-                        w.id,
-                        w.type === "kpi"
-                          ? { span: (w.span ?? 1) >= 2 ? 1 : 2 }
-                          : { span: (w.span ?? 2) >= 4 ? 2 : 4 }
-                      )
-                    }
+                    onClick={() => updateDashboardWidget(w.id, { span: nextWidgetSpan(w) })}
                   >
-                    {(w.span ?? (w.type === "kpi" ? 1 : 2)) >= 4 ? "▭" : (w.span ?? 1) >= 2 ? "½" : "¼"}
+                    {SPAN_LABEL[w.span ?? defaultWidgetSpan(w.type)] ?? "½"}
                   </button>
                   <button
                     className="dash-tool danger"
@@ -738,6 +948,14 @@ export function Dashboard({ eventId }: { eventId?: string }) {
       )}
 
       {importing && <ImportAttendeesModal eventId={ev.id} onClose={() => setImporting(false)} />}
+
+      {sideEditId && (() => {
+        const widget = cfg.widgets.find((w) => w.id === sideEditId);
+        if (!widget) return null;
+        return (
+          <SideMetricsModal eventId={ev.id} cfg={cfg} k={k} widget={widget} onClose={() => setSideEditId(null)} />
+        );
+      })()}
     </div>
   );
 }
