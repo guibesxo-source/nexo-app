@@ -13,11 +13,9 @@ import type { AttendeeStatus, TicketType } from "@/types";
 const norm = (s: string) =>
   s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 
+/** Preserva o nome real do ingresso do CSV; só cai em "Geral" se vier vazio. */
 export function mapTicket(v: string): TicketType {
-  const n = norm(v);
-  if (n.includes("vip")) return "VIP";
-  if (n.includes("pro")) return "Pro";
-  return "Geral";
+  return v.trim() || "Geral";
 }
 
 export function mapStatus(v: string): AttendeeStatus {

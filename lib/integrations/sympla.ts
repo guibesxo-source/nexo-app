@@ -226,11 +226,9 @@ function humanize(key: string): string {
     .join(" ");
 }
 
+/** Preserva o nome real do ingresso do Sympla; só cai em "Geral" se vier vazio. */
 function mapTicket(v: string): TicketType {
-  const n = norm(v);
-  if (n.includes("vip")) return "VIP";
-  if (n.includes("pro")) return "Pro";
-  return "Geral";
+  return v.trim() || "Geral";
 }
 
 function mapSymplaStatus(p: SymplaParticipant): AttendeeStatus {

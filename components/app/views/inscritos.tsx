@@ -15,6 +15,7 @@ import {
   removeAttendee,
   selectedEvent,
   setAttendeeStatus,
+  setToggle,
   useDb,
 } from "@/lib/db";
 import { attendeeSchema } from "@/lib/validations/attendee";
@@ -158,6 +159,89 @@ function LeadFieldsModal({ attendee, onClose }: { attendee: Attendee; onClose: (
   );
 }
 
+/* Facetas filtráveis = as infos que vêm do Sympla/CSV (status já está nas abas):
+   ingresso, empresa, origem + cada campo de lead. O usuário escolhe quais
+   aparecem como filtro; a preferência persiste em settings.toggles. */
+type FacetDef = { key: string; label: string; toggleKey: string; defaultOn: boolean; value: (a: Attendee) => string };
+
+const SOURCE_LABEL: Record<string, string> = { sympla: "Sympla", hubspot: "HubSpot", csv: "CSV" };
+const sourceLabel = (s?: string | null) => (s ? SOURCE_LABEL[s] ?? s : "Manual");
+
+function buildFacets(all: Attendee[]): FacetDef[] {
+  const base: Omit<FacetDef, "toggleKey">[] = [
+    { key: "ticket", label: "Ingresso", defaultOn: true, value: (a) => a.ticket },
+    { key: "company", label: "Empresa", defaultOn: false, value: (a) => a.company || "—" },
+    { key: "source", label: "Origem", defaultOn: false, value: (a) => sourceLabel(a.external_source) },
+    ...leadColumnsOf(all).map((col) => ({
+      key: `lead:${col.key}`,
+      label: col.label,
+      defaultOn: false,
+      value: (a: Attendee) => leadValue(a, col.key),
+    })),
+  ];
+  return base.map((f) => ({ ...f, toggleKey: `insc.facet.${f.key}` }));
+}
+
+/** Botão "Filtros": escolhe quais campos aparecem como filtro na lista. */
+function FilterPicker({ options, onToggle, activeCount = 0 }: {
+  options: { key: string; label: string; on: boolean }[];
+  onToggle: (key: string, on: boolean) => void;
+  activeCount?: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const shownCount = options.filter((o) => o.on).length;
+  return (
+    <span className="menu-wrap">
+      <button
+        className={"btn" + (activeCount > 0 ? " filter-btn-on" : "")}
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="menu"
+        title="Escolher quais campos filtrar"
+      >
+        <Icon name="filter" size={15} />Filtros
+        {activeCount > 0 && <span className="filter-btn-count">{activeCount}</span>}
+      </button>
+      {open && (
+        <>
+          <span className="menu-scrim" onClick={() => setOpen(false)} />
+          <span className="menu left filter-menu" role="menu">
+            <span className="filter-menu-head">
+              Campos para filtrar
+              <span className="filter-menu-sub">{shownCount} de {options.length} visíveis</span>
+            </span>
+            {options.map((o) => (
+              <label key={o.key} className="filter-opt">
+                <input
+                  type="checkbox"
+                  checked={o.on}
+                  onChange={(e) => onToggle(o.key, e.target.checked)}
+                />
+                <span>{o.label}</span>
+              </label>
+            ))}
+          </span>
+        </>
+      )}
+    </span>
+  );
+}
+
+/* Cores distintas por tipo de ingresso (estáveis por evento, sem colisão):
+   "Geral" fica cinza; os demais tipos entram num rodízio de cores fortes na
+   ordem alfabética — assim Participante e Field Sales nunca ficam iguais. */
+const TICKET_TONES = ["blue", "amber", "green", "red"];
+function ticketToneMap(all: Attendee[]): Map<string, string> {
+  const distinct = [...new Set(all.map((a) => a.ticket).filter(Boolean))]
+    .sort((x, y) => x.localeCompare(y, "pt-BR"));
+  const map = new Map<string, string>();
+  let i = 0;
+  for (const t of distinct) {
+    const n = t.trim().toLowerCase();
+    map.set(t, !n || n === "geral" ? "gray" : TICKET_TONES[i++ % TICKET_TONES.length]);
+  }
+  return map;
+}
+
 export function Inscritos() {
   const db = useDb();
   const toast = useToast();
@@ -170,6 +254,8 @@ export function Inscritos() {
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
   const [leadOpen, setLeadOpen] = useState<Attendee | null>(null);
+  // Valor selecionado por faceta ("" = todas); transitório (não persiste).
+  const [facetVal, setFacetVal] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const onSearch = (e: Event) => {
@@ -184,13 +270,25 @@ export function Inscritos() {
   const symplaSync = useSymplaAutoSync(ev?.id ?? null);
   const all = ev ? attendeesOf(db, ev.id).filter((a) => a.status !== "cancelado") : [];
   const leadColumnCount = leadColumnsOf(all).length;
+  const ticketTones = ticketToneMap(all);
 
   const countOf = (id: string) =>
     id === "todos" ? all.length : all.filter((a) => a.status === id).length;
 
+  const facets = buildFacets(all);
+  const visibleFacets = facets.filter((f) => db.settings.toggles[f.toggleKey] ?? f.defaultOn);
+  const activeFacetCount = visibleFacets.filter((f) => facetVal[f.key]).length;
+  const facetOptions = (f: FacetDef) =>
+    [...new Set(all.map(f.value).filter(Boolean))].sort((x, y) => x.localeCompare(y, "pt-BR"));
+  const toggleFacet = (key: string, on: boolean) => {
+    setToggle(`insc.facet.${key}`, on);
+    if (!on) setFacetVal((v) => ({ ...v, [key]: "" }));
+  };
+
   const rows = all
     .filter((a) => tab === "todos" || a.status === tab)
     .filter((a) => !q || (a.name + a.email + a.company + leadSearchText(a)).toLowerCase().includes(q.toLowerCase()))
+    .filter((a) => visibleFacets.every((f) => !facetVal[f.key] || f.value(a) === facetVal[f.key]))
     .sort((a, b) => attendeeSignupAt(b).localeCompare(attendeeSignupAt(a)));
 
   const exportCsv = () => {
@@ -287,6 +385,15 @@ export function Inscritos() {
             onChange={(e) => setQ(e.target.value)}
           />
         </div>
+        <FilterPicker
+          options={facets.map((f) => ({
+            key: f.key,
+            label: f.label,
+            on: db.settings.toggles[f.toggleKey] ?? f.defaultOn,
+          }))}
+          onToggle={toggleFacet}
+          activeCount={activeFacetCount}
+        />
         <div style={{ flex: 1 }} />
         {TABS.map(([id, label]) => (
           <button
@@ -299,6 +406,36 @@ export function Inscritos() {
           </button>
         ))}
       </div>
+
+      {visibleFacets.length > 0 && (
+        <div className="facet-bar">
+          {visibleFacets.map((f) => {
+            const val = facetVal[f.key] ?? "";
+            const opts = facetOptions(f);
+            return (
+              <div className={"facet-field" + (val ? " active" : "")} key={f.key}>
+                <span className="facet-field-label">{f.label}</span>
+                <select
+                  className="input facet-field-select"
+                  value={val}
+                  onChange={(e) => setFacetVal((v) => ({ ...v, [f.key]: e.target.value }))}
+                >
+                  <option value="">Todos ({opts.length})</option>
+                  {opts.map((opt) => (
+                    <option key={opt} value={opt}>{opt}</option>
+                  ))}
+                </select>
+              </div>
+            );
+          })}
+          {activeFacetCount > 0 && (
+            <button className="facet-clear-all" onClick={() => setFacetVal({})}>
+              <Icon name="x" size={13} />
+              Limpar {activeFacetCount} filtro{activeFacetCount === 1 ? "" : "s"}
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="tbl-wrap">
         <table className="tbl">
@@ -338,10 +475,8 @@ export function Inscritos() {
                       </div>
                     </td>
                     <td>{a.company || "—"}</td>
-                    <td>
-                      <Badge tone={a.ticket === "VIP" ? "green" : a.ticket === "Pro" ? "blue" : "gray"}>
-                        {a.ticket}
-                      </Badge>
+                    <td className="ticket-cell">
+                      <Badge tone={ticketTones.get(a.ticket) ?? "gray"}>{a.ticket}</Badge>
                     </td>
                     <td>
                       {leadFields.length === 0 ? (

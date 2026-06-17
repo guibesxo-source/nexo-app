@@ -12,6 +12,7 @@ import {
   EVENT_STATUS_META,
   memberById,
   priorityOf,
+  restoreEvent,
   saveNow,
   selectEvent,
   tasksOf,
@@ -239,12 +240,18 @@ export function Eventos() {
           tone="danger"
           icon="trash"
           title={`Excluir "${confirmDelete.name}"?`}
-          message="Isso remove o evento e todos os inscritos, tarefas e lançamentos dele. Esta ação não pode ser desfeita."
+          message="Isso remove o evento e todos os inscritos, tarefas, lançamentos e cotas dele. Você terá alguns segundos para desfazer."
           confirmLabel="Excluir evento"
           onConfirm={() => {
-            deleteEvent(confirmDelete.id);
-            toast("Evento excluído");
+            const name = confirmDelete.name;
+            const snap = deleteEvent(confirmDelete.id);
             setConfirmDelete(null);
+            if (snap) {
+              toast(`"${name}" excluído`, {
+                duration: 10000,
+                action: { label: "Desfazer", onClick: () => restoreEvent(snap) },
+              });
+            }
           }}
           onCancel={() => setConfirmDelete(null)}
         />

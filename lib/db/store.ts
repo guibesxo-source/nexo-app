@@ -102,6 +102,20 @@ export function sbDelete(table: string, id: string | string[]) {
   );
 }
 
+/**
+ * Insere vários lotes em ordem (await entre eles) — usado para restaurar um
+ * evento e seus filhos respeitando as FKs (evento antes de inscritos/tarefas…).
+ * Fire-and-forget para a UI; no-op se não conectado.
+ */
+export async function sbInsertOrdered(steps: Array<[table: string, rows: Row[]]>) {
+  if (!workspaceId) return;
+  for (const [table, rows] of steps) {
+    if (!rows.length) continue;
+    const { error } = await client().from(table).insert(rows as never);
+    logErr(`insert ${table}`, error);
+  }
+}
+
 export function sbUpsert(table: string, rows: Row | Row[], onConflict?: string) {
   if (!workspaceId) return;
   void client()

@@ -125,15 +125,21 @@ export function Badge({ tone, dot, children }: { tone?: string; dot?: boolean; c
 }
 
 /* ---------- Toast system ---------- */
-const ToastCtx = createContext<(msg: string) => void>(() => {});
+export type ToastAction = { label: string; onClick: () => void };
+export type ToastOptions = { action?: ToastAction; duration?: number };
+type ToastFn = (msg: string, opts?: ToastOptions) => void;
+type ToastItem = { id: number; msg: string; action?: ToastAction };
+
+const ToastCtx = createContext<ToastFn>(() => {});
 let toastSeq = 0;
 
 export function ToastHost({ children }: { children?: ReactNode }) {
-  const [toasts, setToasts] = useState<{ id: number; msg: string }[]>([]);
-  const push = (msg: string) => {
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const dismiss = (id: number) => setToasts((t) => t.filter((x) => x.id !== id));
+  const push: ToastFn = (msg, opts) => {
     const id = ++toastSeq;
-    setToasts((t) => [...t, { id, msg }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 2600);
+    setToasts((t) => [...t, { id, msg, action: opts?.action }]);
+    setTimeout(() => dismiss(id), opts?.duration ?? 2600);
   };
   return (
     <ToastCtx.Provider value={push}>
@@ -143,6 +149,17 @@ export function ToastHost({ children }: { children?: ReactNode }) {
           <div className="toast" key={t.id}>
             <span className="tk">✓</span>
             {t.msg}
+            {t.action && (
+              <button
+                className="toast-action"
+                onClick={() => {
+                  t.action!.onClick();
+                  dismiss(t.id);
+                }}
+              >
+                {t.action.label}
+              </button>
+            )}
           </div>
         ))}
       </div>

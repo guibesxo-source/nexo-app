@@ -23,7 +23,12 @@ export type TxPayment = "pago" | "pendente" | "recebido";
 
 export type MemberRole = "owner" | "admin" | "member" | "viewer";
 
-export type TicketType = "Geral" | "Pro" | "VIP";
+/**
+ * Tipo de ingresso. Texto livre: preserva o nome real do ingresso vindo do
+ * Sympla/CSV (ex.: "Furgão", "Carreta", "Lote 1"). "Geral"/"Pro"/"VIP" são só
+ * presets do formulário manual e o fallback quando a origem não informa.
+ */
+export type TicketType = string;
 
 export type EventFormat = "online" | "presencial" | "hibrido";
 

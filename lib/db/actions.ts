@@ -35,6 +35,7 @@ import {
   saveSettings,
   sbDelete,
   sbInsert,
+  sbInsertOrdered,
   sbUpdate,
 } from "./store";
 import {
@@ -137,14 +138,39 @@ export function updateEvent(id: string, patch: Partial<EventDraft>) {
   if (ws()) sbUpdate("events", id, patch as Row);
 }
 
-export function deleteEvent(id: string) {
+/** Tudo o que um deleteEvent removeu — guarda o necessário para desfazer. */
+export type DeletedEventSnapshot = {
+  event: Event;
+  index: number;
+  attendees: Attendee[];
+  tasks: Task[];
+  transactions: Transaction[];
+  prevSelectedId: string | null;
+};
+
+/**
+ * Exclui o evento e seus filhos (inscritos, tarefas, lançamentos) e devolve um
+ * snapshot para permitir desfazer via {@link restoreEvent}. Retorna null se o
+ * evento não existia.
+ */
+export function deleteEvent(id: string): DeletedEventSnapshot | null {
+  let snap: DeletedEventSnapshot | null = null;
   let selected: string | null = null;
   let leadSettingsChanged = false;
   mutate((s) => {
-    const removedAttendeeIds = s.attendees.filter((a) => a.event_id === id).map((a) => a.id);
+    const index = s.events.findIndex((e) => e.id === id);
+    if (index === -1) return s;
+    snap = {
+      event: s.events[index],
+      index,
+      attendees: s.attendees.filter((a) => a.event_id === id),
+      tasks: s.tasks.filter((t) => t.event_id === id),
+      transactions: s.transactions.filter((t) => t.event_id === id),
+      prevSelectedId: s.session.selected_event_id,
+    };
     const leadStore = removeLeadFieldStoreEntries(
       s.settings.attendee_lead_fields,
-      removedAttendeeIds
+      snap.attendees.map((a) => a.id)
     );
     leadSettingsChanged = leadStore.changed;
     const events = s.events.filter((e) => e.id !== id);
@@ -164,10 +190,52 @@ export function deleteEvent(id: string) {
         : s.settings,
     };
   });
+  if (!snap) return null;
   saveSelectedEvent(selected);
   if (leadSettingsChanged) saveSettings();
   // FK on delete cascade derruba attendees/tasks/transactions/anexos no banco.
   if (ws()) sbDelete("events", id);
+  return snap;
+}
+
+/** Desfaz um deleteEvent: recoloca o evento e todos os filhos onde estavam. */
+export function restoreEvent(snap: DeletedEventSnapshot) {
+  let leadSettingsChanged = false;
+  mutate((s) => {
+    if (s.events.some((e) => e.id === snap.event.id)) return s; // já restaurado
+    const events = [...s.events];
+    events.splice(Math.min(snap.index, events.length), 0, snap.event);
+    const leadStore = updateLeadFieldStore(s.settings.attendee_lead_fields, snap.attendees);
+    leadSettingsChanged = leadStore.changed;
+    return {
+      ...s,
+      events,
+      attendees: [...snap.attendees, ...s.attendees],
+      tasks: [...snap.tasks, ...s.tasks],
+      transactions: [...snap.transactions, ...s.transactions],
+      session: { ...s.session, selected_event_id: snap.prevSelectedId },
+      settings: leadStore.changed
+        ? { ...s.settings, attendee_lead_fields: leadStore.value }
+        : s.settings,
+    };
+  });
+  saveSelectedEvent(snap.prevSelectedId);
+  if (leadSettingsChanged) saveSettings();
+  const w = ws();
+  if (w) {
+    const attachmentRows = snap.tasks.flatMap((t) =>
+      (t.attachments ?? []).map((att) => attachmentToRow(w, t.id, att))
+    );
+    // Ordem segura para as FKs: evento → inscritos/tarefas/lançamentos → anexos.
+    void sbInsertOrdered([
+      ["events", [eventToRow(w, snap.event)]],
+      ["attendees", snap.attendees.map((a) => attendeeToRow(w, a))],
+      ["tasks", snap.tasks.map((t) => taskToRow(w, t))],
+      ["transactions", snap.transactions.map((t) => transactionToRow(w, t))],
+      ["task_attachments", attachmentRows],
+    ]);
+  }
+  logActivity("↩️", ["Evento ", snap.event.name, " restaurado"]);
 }
 
 /* ---------- Inscritos ---------- */

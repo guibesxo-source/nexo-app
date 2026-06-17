@@ -9,6 +9,7 @@ import {
   BarChart, Card, Donut, Empty, Field, Icon, Kpi, Modal, PageHead, useToast,
 } from "@/components/app/kit";
 import { useGo, useUi } from "@/components/app/shell";
+import { ImportAttendeesModal } from "@/components/app/import-attendees";
 import { useSymplaAutoSync } from "@/components/app/sympla-sync";
 import {
   addCustomMetric,
@@ -31,7 +32,6 @@ import {
   useDb,
   type EventKpis,
 } from "@/lib/db";
-import { downloadCsv, toCsv } from "@/lib/csv";
 import { daysUntil, fmtMoney, relTime } from "@/lib/format";
 import type {
   CustomMetricAgg,
@@ -351,6 +351,7 @@ export function Dashboard({ eventId }: { eventId?: string }) {
   const dashboardRef = useRef<HTMLDivElement>(null);
   const [editing, setEditing] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [dragId, setDragId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
   const [signupFrom, setSignupFrom] = useState("");
@@ -421,28 +422,6 @@ export function Dashboard({ eventId }: { eventId?: string }) {
   const syncSub = symplaSync.link
     ? `Sympla ${symplaSync.busy ? "sincronizando..." : symplaSync.link.last_sync_at ? `sincronizado ${relTime(symplaSync.link.last_sync_at)}` : "vinculado"} · ${k.total} inscritos`
     : `Atualizado agora · ${db.members.length} membros na organização`;
-
-  const exportSummary = () => {
-    const csv = toCsv(
-      ["Indicador", "Valor"],
-      [
-        ["Evento", ev.name],
-        ["Inscritos", k.total],
-        ["Confirmados", k.confirmed],
-        ["Check-ins", k.checkin],
-        ["Taxa de confirmação (%)", k.confirmRate],
-        ["Orçamento previsto", ev.budget_planned],
-        ["Gasto", k.spent],
-        ["Receitas", k.income],
-        ["Saldo disponível", k.available],
-        ["Tarefas concluídas", `${k.tasksDone}/${k.tasksTotal}`],
-        ["Tarefas atrasadas", k.tasksLate],
-        ["Custo por inscrito", k.costPerAttendee],
-      ]
-    );
-    downloadCsv(`nexo-resumo-${ev.name.toLowerCase().replace(/\s+/g, "-")}.csv`, csv);
-    toast("Resumo exportado (CSV)");
-  };
 
   const ids = cfg.widgets.map((w) => w.id);
   const onDrop = (targetId: string) => {
@@ -670,10 +649,14 @@ export function Dashboard({ eventId }: { eventId?: string }) {
                   <Icon name="refresh" size={15} />{symplaSync.busy ? "Sincronizando" : "Sync Sympla"}
                 </button>
               )}
-              <button className="btn" onClick={exportSummary}>
-                <Icon name="download" size={15} />Exportar
+              <button className="btn" onClick={() => setImporting(true)}>
+                <Icon name="upload" size={15} />Importar lista
               </button>
-              <button className="btn" onClick={() => setEditing(true)}>
+              <button
+                className="btn"
+                disabled
+                title="Em breve — estamos ajustando a personalização do dashboard"
+              >
                 <Icon name="grid" size={15} />Personalizar
               </button>
               <button className="btn btn-primary" onClick={openNewEvent}>
@@ -753,6 +736,8 @@ export function Dashboard({ eventId }: { eventId?: string }) {
       {adding && (
         <AddWidgetModal eventId={ev.id} cfg={cfg} k={k} onClose={() => setAdding(false)} />
       )}
+
+      {importing && <ImportAttendeesModal eventId={ev.id} onClose={() => setImporting(false)} />}
     </div>
   );
 }
