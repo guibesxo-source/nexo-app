@@ -39,6 +39,12 @@ const PARTICIPANT_FIELDS = [
   "status",
   "checkin",
   "custom_form",
+  // tracking de origem (quando o pedido carrega UTM) — o Sympla ignora os que não existem
+  "utm_source",
+  "utm_medium",
+  "utm_campaign",
+  "utm_term",
+  "utm_content",
 ].join(",");
 
 type SymplaPage = {
@@ -79,11 +85,19 @@ export async function POST(request: Request) {
     const data =
       parsed.data.resource === "events"
         ? await fetchAllPages(`${BASE}/events`, token, 3)
-        : await fetchAllPages(
-            `${BASE}/events/${encodeURIComponent(parsed.data.eventId)}/participants?fields=${encodeURIComponent(PARTICIPANT_FIELDS)}&field_sort=order_date&sort=DESC&timezone=America%2FSao_Paulo`,
-            token,
-            100
-          );
+        : parsed.data.resource === "orders"
+          ? // Pedidos trazem o tracking de origem (UTM), ausente nos participantes.
+            // Sem `fields` para vir o payload completo do pedido.
+            await fetchAllPages(
+              `${BASE}/events/${encodeURIComponent(parsed.data.eventId)}/orders?timezone=America%2FSao_Paulo`,
+              token,
+              100
+            )
+          : await fetchAllPages(
+              `${BASE}/events/${encodeURIComponent(parsed.data.eventId)}/participants?fields=${encodeURIComponent(PARTICIPANT_FIELDS)}&field_sort=order_date&sort=DESC&timezone=America%2FSao_Paulo`,
+              token,
+              100
+            );
     return NextResponse.json({ data });
   } catch (err) {
     if (err instanceof Error && err.message === "unauthorized") {

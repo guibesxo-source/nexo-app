@@ -1178,6 +1178,12 @@ export function removeEventFile(eventId: string, id: string) {
   saveSettings();
 }
 
+/** Campos visíveis no painel "Dados do lead" (vazio = todos). */
+export function setLeadPanelFields(keys: string[]) {
+  mutate((s) => ({ ...s, settings: { ...s.settings, lead_panel_fields: keys } }));
+  saveSettings();
+}
+
 export function setToggle(key: string, value: boolean) {
   mutate((s) => ({
     ...s,

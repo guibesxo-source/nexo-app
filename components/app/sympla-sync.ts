@@ -8,6 +8,7 @@ import {
   type AttendeeImportResult,
 } from "@/lib/db";
 import {
+  orderUtm,
   symplaParticipantsToDrafts,
   type SymplaParticipant,
 } from "@/lib/integrations/sympla";
@@ -30,15 +31,40 @@ export async function callSympla(body: Record<string, string>): Promise<unknown[
   return json.data;
 }
 
+/** Pedidos do evento (carregam o UTM, ausente nos participantes). Best-effort:
+   se o endpoint falhar, devolve [] e o sync segue sem UTM. */
+async function loadSymplaOrders(token: string, symplaEventId: string): Promise<Record<string, unknown>[]> {
+  try {
+    return (await callSympla({ resource: "orders", token, eventId: symplaEventId })) as Record<string, unknown>[];
+  } catch {
+    return [];
+  }
+}
+
 export async function loadSymplaParticipants(
   token: string,
   symplaEventId: string
 ): Promise<SymplaParticipant[]> {
-  return (await callSympla({
-    resource: "participants",
-    token,
-    eventId: symplaEventId,
-  })) as SymplaParticipant[];
+  const [participants, orders] = await Promise.all([
+    callSympla({ resource: "participants", token, eventId: symplaEventId }) as Promise<SymplaParticipant[]>,
+    loadSymplaOrders(token, symplaEventId),
+  ]);
+
+  // Cruza o UTM do pedido em cada participante (por order_id).
+  const utmByOrder = new Map<string, Record<string, string>>();
+  for (const order of orders) {
+    const id = String(order.id ?? order.order_id ?? "");
+    if (!id) continue;
+    const utm = orderUtm(order);
+    if (Object.keys(utm).length) utmByOrder.set(id, utm);
+  }
+  if (utmByOrder.size === 0) return participants;
+
+  return participants.map((p) => {
+    const orderId = String(p.order_id ?? p.order?.id ?? "");
+    const utm = orderId ? utmByOrder.get(orderId) : undefined;
+    return utm ? { ...p, utm } : p;
+  });
 }
 
 export function syncSymplaParticipants({

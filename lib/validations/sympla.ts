@@ -12,6 +12,11 @@ export const symplaRequestSchema = z.discriminatedUnion("resource", [
     token,
     eventId: z.string().trim().min(1, "Informe o evento"),
   }),
+  z.object({
+    resource: z.literal("orders"),
+    token,
+    eventId: z.string().trim().min(1, "Informe o evento"),
+  }),
 ]);
 
 export type SymplaRequest = z.infer<typeof symplaRequestSchema>;

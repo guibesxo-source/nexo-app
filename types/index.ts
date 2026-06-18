@@ -231,7 +231,15 @@ export type SymplaEventLink = {
   field_keys?: string[];
 };
 
-export type EventFileCategory = "midia-kit" | "fotos" | "briefing" | "metas" | "documento" | "outro";
+export type EventFileCategory =
+  | "midia-kit"
+  | "criativos"
+  | "fotos"
+  | "briefing"
+  | "metas"
+  | "off"
+  | "documento"
+  | "outro";
 
 /** Arquivo/recurso de um evento: um link na nuvem (Drive, Dropbox, Figma…) ou
    um upload pequeno (data URL). Persistido no blob de settings (app_settings). */
@@ -270,6 +278,8 @@ export type AppSettings = {
   day_notes?: Record<string, string>;
   /** Arquivos/recursos por evento (mídia kit, fotos, briefing, metas) — chave = event_id. */
   event_files?: Record<string, EventFile[]>;
+  /** Campos visíveis no painel "Dados do lead" (chaves de lead_fields). Vazio/ausente = todos. */
+  lead_panel_fields?: string[];
 };
 
 export type Session = {

@@ -66,6 +66,12 @@ export type SymplaParticipant = {
   };
   checkin?: { check_in?: boolean | number; check_in_date?: string };
   checked_in?: boolean | number;
+  utm_source?: string;
+  utm_medium?: string;
+  utm_campaign?: string;
+  utm_term?: string;
+  utm_content?: string;
+  utm?: Record<string, unknown> | null;
 };
 
 export type SymplaFieldOption = {
@@ -401,8 +407,79 @@ function customLeadFields(p: SymplaParticipant): LeadField[] {
   });
 }
 
+const UTM_LABELS: Record<string, string> = {
+  utm_source: "UTM Source",
+  utm_medium: "UTM Medium",
+  utm_campaign: "UTM Campaign",
+  utm_term: "UTM Term",
+  utm_content: "UTM Content",
+  utm_id: "UTM ID",
+};
+
+/**
+ * Coleta os campos de UTM em qualquer lugar de um objeto — na raiz, em aninhados
+ * ou num objeto `utm`/`tracking` — já que o Sympla pode estruturar de jeitos
+ * diferentes. Normaliza para `utm_<campo>`.
+ */
+function collectUtm(root: unknown): Map<string, string> {
+  const found = new Map<string, string>();
+  const consider = (rawKey: string, value: unknown) => {
+    const m = rawKey.toLowerCase().match(/^utm[_-]?(source|medium|campaign|term|content|id)$/);
+    if (!m) return;
+    const norm = `utm_${m[1]}`;
+    const text = leadValue(value);
+    if (text && !found.has(norm)) found.set(norm, text);
+  };
+  const visit = (v: unknown, depth: number) => {
+    if (v == null || depth > 4) return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item, depth + 1);
+      return;
+    }
+    const rec = asRecord(v);
+    if (!rec) return;
+    for (const [key, value] of Object.entries(rec)) {
+      consider(key, value);
+      if (/^(utm|utms|tracking)$/i.test(key)) {
+        const inner = asRecord(value);
+        if (inner) for (const [k2, v2] of Object.entries(inner)) { consider(k2, v2); consider(`utm_${k2}`, v2); }
+      }
+      if (value && typeof value === "object") visit(value, depth + 1);
+    }
+  };
+  visit(root, 0);
+  return found;
+}
+
+function utmLeadFields(p: SymplaParticipant): LeadField[] {
+  return [...collectUtm(p).entries()].map(([key, value]) => ({
+    key: `sympla:${key}`,
+    label: UTM_LABELS[key] ?? humanize(key),
+    value,
+    source: "sympla" as const,
+    group: "lead" as const,
+  }));
+}
+
+/** Chave de campo é sempre incluída no sync, mesmo fora do field_keys do usuário. */
+const isAlwaysIncluded = (key: string) =>
+  REQUIRED_SIGNUP_FIELD_KEYS.has(key) || key.startsWith("sympla:utm_");
+
+/** UTM de um pedido (endpoint /orders) como objeto limpo `{ utm_source, ... }`
+   para anexar ao participante (cruzado por order_id). */
+export function orderUtm(order: unknown): Record<string, string> {
+  return Object.fromEntries(collectUtm(order));
+}
+
 function allLeadFields(p: SymplaParticipant): LeadField[] {
-  return [...rootLeadFields(p), ...customLeadFields(p)];
+  // UTM primeiro: se a mesma chave também vier do root, vence o rótulo bonito.
+  const fields = [...utmLeadFields(p), ...rootLeadFields(p), ...customLeadFields(p)];
+  const seen = new Set<string>();
+  return fields.filter((f) => {
+    if (seen.has(f.key)) return false;
+    seen.add(f.key);
+    return true;
+  });
 }
 
 export function discoverSymplaFields(participants: SymplaParticipant[]): SymplaFieldOption[] {
@@ -446,7 +523,7 @@ function selectedLeadFields(p: SymplaParticipant, selectedKeys: string[]): LeadF
   const selected = new Set(selectedKeys);
   const order = new Map(selectedKeys.map((key, index) => [key, index]));
   return allLeadFields(p)
-    .filter((field) => selected.has(field.key) || REQUIRED_SIGNUP_FIELD_KEYS.has(field.key))
+    .filter((field) => selected.has(field.key) || isAlwaysIncluded(field.key))
     .sort(
       (a, b) =>
         (order.get(a.key) ?? Number.MAX_SAFE_INTEGER) -

@@ -874,6 +874,7 @@ table.tbl td { padding: 14px 18px; border-bottom: 1px solid var(--line-2); }
 table.tbl tr:last-child td { border-bottom: 0; }
 table.tbl tbody tr { transition: background 0.12s var(--ease); }
 table.tbl tbody tr:hover { background: var(--panel); }
+table.tbl tbody tr.tbl-row-click { cursor: pointer; }
 .cell-user { display: flex; align-items: center; gap: 11px; }
 .cell-user .nm { font-weight: 600; }
 .cell-user .em { color: var(--dim); font-size: 12px; }
@@ -1354,6 +1355,36 @@ select.input { appearance: none; background-image: linear-gradient(45deg, transp
 .lead-detail-label span:first-child { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lead-detail-value { margin-top: 5px; font-size: 13.5px; font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
 @media (max-width: 620px) { .lead-detail-grid { grid-template-columns: 1fr; } }
+
+/* "+" do painel de lead + seletor de campos */
+.lead-modal-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex: 1; min-width: 0; }
+.lead-fields-btn {
+  width: 30px; height: 30px; border-radius: 99px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--line); background: var(--white); color: var(--text);
+  transition: all 0.13s var(--ease);
+}
+.lead-fields-btn:hover { border-color: var(--green-deep); color: var(--green-deep); background: var(--green-soft); }
+.lead-fields-btn.active { background: var(--green); border-color: var(--green); color: #000; }
+.lead-pick-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  font-size: 12px; color: var(--dim); font-weight: 600; margin-bottom: 12px;
+}
+.lead-pick-all { font-size: 12px; font-weight: 700; color: var(--green-deep); }
+.lead-pick-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 620px) { .lead-pick-grid { grid-template-columns: 1fr; } }
+.lead-pick-row {
+  display: flex; align-items: center; gap: 10px; text-align: left; min-width: 0;
+  border: 1px solid var(--line); border-radius: var(--r-md); padding: 9px 11px;
+  background: var(--white); color: var(--text); transition: all 0.13s var(--ease);
+}
+.lead-pick-row:hover { border-color: var(--green-deep); }
+.lead-pick-row.on { border-color: var(--green-deep); background: var(--green-soft); }
+.lead-pick-row .lp-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.lead-pick-row .lp-nm { font-size: 12.5px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lead-pick-row .lp-val { font-size: 11.5px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lead-pick-row > svg { flex-shrink: 0; color: var(--dim); }
+.lead-pick-row.on > svg { color: var(--green-deep); }
 
 /* ---------- APIs & Integrações (tela /integracoes) ---------- */
 .integ-section {

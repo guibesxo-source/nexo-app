@@ -385,9 +385,11 @@ export function categoryTotals(s: DbState, eventId: string) {
 
 export const EVENT_FILE_CATEGORIES: { id: EventFileCategory; label: string; icon: string; hint: string }[] = [
   { id: "midia-kit", label: "Mídia kit", icon: "image", hint: "Logos, fontes, manual de marca" },
+  { id: "criativos", label: "Criativos", icon: "sparkle", hint: "Peças de anúncio, posts e banners" },
   { id: "fotos", label: "Fotos", icon: "camera", hint: "Álbuns e registros do evento" },
   { id: "briefing", label: "Briefing", icon: "note", hint: "Escopo, roteiro e referências" },
   { id: "metas", label: "Metas", icon: "trending", hint: "Objetivos e indicadores" },
+  { id: "off", label: "Materiais off", icon: "paperclip", hint: "Impressos, sinalização e brindes" },
   { id: "documento", label: "Documentos", icon: "paperclip", hint: "Contratos, planilhas, PDFs" },
   { id: "outro", label: "Outros", icon: "grid", hint: "Demais arquivos do evento" },
 ];

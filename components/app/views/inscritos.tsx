@@ -15,6 +15,7 @@ import {
   removeAttendee,
   selectedEvent,
   setAttendeeStatus,
+  setLeadPanelFields,
   setToggle,
   useDb,
 } from "@/lib/db";
@@ -123,11 +124,54 @@ function AttendeeFormModal({ eventId, onClose }: { eventId: string; onClose: () 
   );
 }
 
-function LeadFieldsModal({ attendee, onClose }: { attendee: Attendee; onClose: () => void }) {
+/** Rótulos amigáveis para chaves de UTM (origem do lead). */
+const UTM_LABELS: Record<string, string> = {
+  utm_source: "UTM Source", utm_medium: "UTM Medium", utm_campaign: "UTM Campaign",
+  utm_content: "UTM Content", utm_term: "UTM Term", utm_id: "UTM ID",
+  source: "Origem (source)", medium: "Mídia (medium)", campaign: "Campanha",
+};
+
+/** Rótulo de exibição do campo (UTM bonitinho; senão o rótulo do dado). */
+function leadLabel(key: string, fallback: string): string {
+  const bare = key.replace(/^[^:]+:/, "").toLowerCase();
+  return UTM_LABELS[bare] ?? fallback;
+}
+
+function LeadFieldsModal({ attendee, columns, onClose }: {
+  attendee: Attendee; columns: LeadColumn[]; onClose: () => void;
+}) {
+  const db = useDb();
+  const [editing, setEditing] = useState(false);
+  const pref = db.settings.lead_panel_fields;
+  const isAll = !pref || pref.length === 0;
+
   const fields = leadFieldsOf(attendee);
+  const shown = isAll ? fields : fields.filter((f) => pref!.includes(f.key));
+
+  const allKeys = columns.map((c) => c.key);
+  const currentVisible = isAll ? new Set(allKeys) : new Set(pref);
+  const toggle = (key: string) => {
+    const next = new Set(currentVisible);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    const isEverything = next.size === allKeys.length && allKeys.every((k) => next.has(k));
+    setLeadPanelFields(isEverything ? [] : [...next]);
+  };
+
   return (
     <Modal
-      title="Dados do lead"
+      title={
+        <div className="lead-modal-title">
+          <span>Dados do lead</span>
+          <button
+            className={"lead-fields-btn" + (editing ? " active" : "")}
+            title={editing ? "Concluir" : "Escolher quais informações aparecem"}
+            onClick={() => setEditing((e) => !e)}
+          >
+            <Icon name={editing ? "check" : "plus"} size={15} />
+          </button>
+        </div>
+      }
       onClose={onClose}
       width={620}
       footer={<button className="btn" onClick={onClose}>Fechar</button>}
@@ -140,14 +184,52 @@ function LeadFieldsModal({ attendee, onClose }: { attendee: Attendee; onClose: (
         </div>
       </div>
 
-      {fields.length === 0 ? (
-        <Empty icon="users" title="Sem campos extras" sub="Este inscrito ainda nao tem dados adicionais de lead." />
+      {editing ? (
+        columns.length === 0 ? (
+          <Empty icon="users" title="Sem campos" sub="Sincronize inscritos do Sympla para escolher os campos do lead." />
+        ) : (
+          <>
+            <div className="lead-pick-head">
+              <span>Escolha as informações exibidas neste painel · {currentVisible.size}/{allKeys.length}</span>
+              {!isAll && (
+                <button className="lead-pick-all" onClick={() => setLeadPanelFields([])}>Mostrar todas</button>
+              )}
+            </div>
+            <div className="lead-pick-grid">
+              {columns.map((col) => {
+                const on = currentVisible.has(col.key);
+                const sample = leadValue(attendee, col.key);
+                return (
+                  <button
+                    key={col.key}
+                    className={"lead-pick-row" + (on ? " on" : "")}
+                    onClick={() => toggle(col.key)}
+                  >
+                    <span className="lp-meta">
+                      <span className="lp-nm">{leadLabel(col.key, col.label)}</span>
+                      {sample && <span className="lp-val">{sample}</span>}
+                    </span>
+                    <Icon name={on ? "check" : "plus"} size={15} />
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )
+      ) : shown.length === 0 ? (
+        <Empty
+          icon="users"
+          title={fields.length === 0 ? "Sem campos extras" : "Nenhum campo selecionado"}
+          sub={fields.length === 0
+            ? "Este inscrito ainda nao tem dados adicionais de lead."
+            : "Use o + no topo para escolher quais informações ver aqui."}
+        />
       ) : (
         <div className="lead-detail-grid">
-          {fields.map((field) => (
+          {shown.map((field) => (
             <div className="lead-detail-row" key={`${field.key}:${field.label}`}>
               <div className="lead-detail-label">
-                <span>{field.label}</span>
+                <span>{leadLabel(field.key, field.label)}</span>
                 {field.source === "sympla" && <Badge tone="gray">Sympla</Badge>}
               </div>
               <div className="lead-detail-value">{field.value}</div>
@@ -464,7 +546,12 @@ export function Inscritos() {
                 const meta = ATTENDEE_STATUS_META[a.status];
                 const leadFields = leadFieldsOf(a);
                 return (
-                  <tr key={a.id}>
+                  <tr
+                    key={a.id}
+                    className="tbl-row-click"
+                    onClick={() => setLeadOpen(a)}
+                    title="Ver dados do lead"
+                  >
                     <td>
                       <div className="cell-user">
                         <Avatar initials={initialsOf(a.name)} />
@@ -497,7 +584,7 @@ export function Inscritos() {
                     </td>
                     <td><Badge tone={meta.tone} dot>{meta.label}</Badge></td>
                     <td style={{ color: "var(--dim)" }}>{fmtDateTime(attendeeSignupAt(a))}</td>
-                    <td><Menu items={statusActions(a)} /></td>
+                    <td onClick={(e) => e.stopPropagation()}><Menu items={statusActions(a)} /></td>
                   </tr>
                 );
               })
@@ -511,7 +598,9 @@ export function Inscritos() {
 
       {adding && <AttendeeFormModal eventId={ev.id} onClose={() => setAdding(false)} />}
       {importing && <ImportAttendeesModal eventId={ev.id} onClose={() => setImporting(false)} />}
-      {leadOpen && <LeadFieldsModal attendee={leadOpen} onClose={() => setLeadOpen(null)} />}
+      {leadOpen && (
+        <LeadFieldsModal attendee={leadOpen} columns={leadColumnsOf(all)} onClose={() => setLeadOpen(null)} />
+      )}
     </div>
   );
 }
