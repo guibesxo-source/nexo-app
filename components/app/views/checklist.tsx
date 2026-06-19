@@ -2,14 +2,16 @@
 
 /* Checklist — FR-D1..D3: tarefas por evento com responsável, prazo,
    progresso e destaque de atrasadas. */
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Avatar, Badge, Card, Empty, Field, Icon, Menu, Modal, PageHead, useToast,
 } from "@/components/app/kit";
+import { ClickupImportModal } from "@/components/app/clickup-import";
 import {
   addTask,
   allTemplates,
   applyTemplate,
+  categorizeChecklistTask,
   isTaskLate,
   memberById,
   PHASE_META,
@@ -25,7 +27,7 @@ import {
 import { TaskDetail } from "@/components/app/task-detail";
 import { taskSchema } from "@/lib/validations/task";
 import { templateNameSchema } from "@/lib/validations/template";
-import { fmtDateShort, fmtMoney } from "@/lib/format";
+import { daysUntil, fmtDateShort, fmtMoney } from "@/lib/format";
 import type { ChecklistTemplate, Event, Task, TaskPhase } from "@/types";
 
 const FORMAT_LABEL: Record<string, string> = {
@@ -34,7 +36,75 @@ const FORMAT_LABEL: Record<string, string> = {
   hibrido: "Híbrido",
 };
 
-const DEFAULT_GROUPS = ["Pré-produção", "Marketing & Inscrições", "Produção & Dia do evento"];
+const DEFAULT_GROUPS = [
+  "Conteúdo & Criativos",
+  "Inscrições & Público",
+  "Comunicação",
+  "Comercial & Patrocínios",
+  "Operação & Logística",
+  "Programação & Palco",
+  "Técnico & Audiovisual",
+  "Financeiro & Jurídico",
+  "Pós-evento",
+  "Geral",
+];
+
+const CATEGORY_ICONS: { match: string[]; icon: string }[] = [
+  { match: ["conteúdo", "criativo", "branding"], icon: "image" },
+  { match: ["inscrição", "público", "credencial"], icon: "ticket" },
+  { match: ["comunicação", "email", "whatsapp"], icon: "mail" },
+  { match: ["comercial", "patroc"], icon: "wallet" },
+  { match: ["operação", "logística", "produção"], icon: "grid" },
+  { match: ["programação", "palco"], icon: "calendarDays" },
+  { match: ["técnico", "audiovisual"], icon: "bolt" },
+  { match: ["financeiro", "jurídico"], icon: "wallet" },
+  { match: ["pós"], icon: "checkSquare" },
+];
+
+function categoryIcon(name: string): string {
+  const n = name.toLowerCase();
+  return CATEGORY_ICONS.find((x) => x.match.some((m) => n.includes(m)))?.icon ?? "checkSquare";
+}
+
+function phaseMeta(id: TaskPhase) {
+  return PHASE_META.find((p) => p.id === id) ?? PHASE_META[0];
+}
+
+function dueText(t: Task): string {
+  if (!t.due_date) return "sem prazo";
+  return fmtDateShort(t.due_date);
+}
+
+type PriorityId = "late" | "today" | "next" | "scheduled" | "no_due" | "done";
+
+const PRIORITY_META: {
+  id: PriorityId;
+  label: string;
+  sub: string;
+  icon: string;
+  tone: "danger" | "hot" | "next" | "muted" | "done";
+}[] = [
+  { id: "late", label: "Atrasadas", sub: "resolver primeiro", icon: "bolt", tone: "danger" },
+  { id: "today", label: "Hoje", sub: "prazo no dia", icon: "clock", tone: "hot" },
+  { id: "next", label: "Próximos 7 dias", sub: "preparar agora", icon: "calendarDays", tone: "next" },
+  { id: "scheduled", label: "Programadas", sub: "depois desta semana", icon: "calendar", tone: "muted" },
+  { id: "no_due", label: "Sem prazo", sub: "definir data", icon: "note", tone: "muted" },
+  { id: "done", label: "Concluídas", sub: "histórico", icon: "checkSquare", tone: "done" },
+];
+
+function taskPriority(t: Task): PriorityId {
+  if (t.status === "concluida") return "done";
+  if (isTaskLate(t)) return "late";
+  if (!t.due_date) return "no_due";
+  const d = daysUntil(t.due_date);
+  if (d <= 0) return "today";
+  if (d <= 7) return "next";
+  return "scheduled";
+}
+
+function taskSegment(t: Task): string {
+  return categorizeChecklistTask(t.title, t.group);
+}
 
 function TaskFormModal({ eventId, groups, defaultPhase = "pre", onClose }: {
   eventId: string; groups: string[]; defaultPhase?: TaskPhase; onClose: () => void;
@@ -168,12 +238,17 @@ function TemplateRow({ tpl, onApply, onDelete }: {
   );
 }
 
-function TemplatePickerModal({ event, onClose }: { event: Event; onClose: () => void }) {
+function TemplatePickerModal({ event, onClose, onClickupImport }: {
+  event: Event;
+  onClose: () => void;
+  onClickupImport?: () => void;
+}) {
   const db = useDb();
   const toast = useToast();
   const templates = allTemplates(db);
   const builtins = templates.filter((t) => t.builtin);
   const custom = templates.filter((t) => !t.builtin);
+  const clickupConnected = !!db.settings.clickup_token;
 
   const apply = (tpl: ChecklistTemplate) => {
     const n = applyTemplate(event.id, tpl);
@@ -192,6 +267,26 @@ function TemplatePickerModal({ event, onClose }: { event: Event; onClose: () => 
         As tarefas são adicionadas ao checklist deste evento (sem apagar as existentes).
         Os prazos são calculados a partir da data do evento.
       </p>
+      {clickupConnected && onClickupImport && (
+        <div
+          style={{
+            display: "flex", alignItems: "center", gap: 12, padding: "12px 14px",
+            border: "1px solid var(--line)", borderRadius: 12, marginBottom: 12,
+            background: "var(--panel)",
+          }}
+        >
+          <span className="empty-ic" style={{ width: 36, height: 36, borderRadius: 10, margin: 0 }}>
+            <Icon name="bolt" size={17} />
+          </span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 800, fontSize: 14.5 }}>Importar do ClickUp</div>
+            <div style={{ fontSize: 12.5, color: "var(--dim)", marginTop: 2 }}>
+              Escolha uma pasta e depois o projeto/lista para usar como template.
+            </div>
+          </div>
+          <button className="btn btn-primary" onClick={onClickupImport}>Escolher</button>
+        </div>
+      )}
       <div>
         {builtins.map((tpl) => (
           <TemplateRow key={tpl.id} tpl={tpl} onApply={() => apply(tpl)} />
@@ -277,15 +372,55 @@ const SEGMENTS: [string, string][] = [
   ["atrasadas", "Atrasadas"],
   ["concluidas", "Concluídas"],
 ];
+const SEGMENT_IDS = new Set(SEGMENTS.map(([id]) => id));
+
+function initialChecklistTab(): string | null {
+  if (typeof window === "undefined") return null;
+  return new URLSearchParams(window.location.search).get("tab");
+}
 
 export function Checklist() {
   const db = useDb();
   const toast = useToast();
-  const [seg, setSeg] = useState("todas");
-  const [adding, setAdding] = useState(false);
-  const [picking, setPicking] = useState(false);
+  const [seg, setSeg] = useState(() => {
+    const tab = initialChecklistTab();
+    return tab && SEGMENT_IDS.has(tab) ? tab : "todas";
+  });
+  const [adding, setAdding] = useState(() => initialChecklistTab() === "nova");
+  const [picking, setPicking] = useState(() => initialChecklistTab() === "templates");
   const [saving, setSaving] = useState(false);
+  const [clickupImport, setClickupImport] = useState(false);
   const [openTask, setOpenTask] = useState<string | null>(null);
+
+  const applyShortcut = useCallback((shortcut: string | null | undefined) => {
+    if (!shortcut) return;
+    if (SEGMENT_IDS.has(shortcut)) {
+      setSeg(shortcut);
+      setAdding(false);
+      setPicking(false);
+      setClickupImport(false);
+      return;
+    }
+    if (shortcut === "templates") {
+      setAdding(false);
+      setClickupImport(false);
+      setPicking(true);
+      return;
+    }
+    if (shortcut === "nova") {
+      setPicking(false);
+      setClickupImport(false);
+      setAdding(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    const onShortcut: EventListener = (event) => {
+      applyShortcut((event as unknown as CustomEvent<string>).detail);
+    };
+    window.addEventListener("nexo:checklist", onShortcut);
+    return () => window.removeEventListener("nexo:checklist", onShortcut);
+  }, [applyShortcut]);
 
   const ev = selectedEvent(db);
   const all = ev ? tasksOf(db, ev.id) : [];
@@ -299,24 +434,46 @@ export function Checklist() {
     (seg === "atrasadas" && isTaskLate(t)) ||
     (seg === "concluidas" && t.status === "concluida");
 
-  // Agrupa por fase (pré/durante/pós) e, dentro de cada fase, por grupo
-  // (preservando a ordem de aparição dos grupos).
-  const byPhase = new Map<TaskPhase, { name: string; tasks: Task[] }[]>();
-  for (const t of all) {
-    const ph = phaseOf(t, ev);
-    let groups = byPhase.get(ph);
-    if (!groups) {
-      groups = [];
-      byPhase.set(ph, groups);
+  const groupNames = [
+    ...new Set([
+      ...DEFAULT_GROUPS,
+      ...all.map((t) => t.group),
+      ...all.map(taskSegment),
+    ]),
+  ];
+  const categoryOrder = new Map(DEFAULT_GROUPS.map((g, i) => [g, i]));
+
+  const sortTasks = (tasks: Task[]) =>
+    tasks.slice().sort((a, b) => {
+      const ad = a.due_date ?? "9999-12-31";
+      const bd = b.due_date ?? "9999-12-31";
+      return ad.localeCompare(bd) || a.title.localeCompare(b.title);
+    });
+
+  const sortSegments = (a: { name: string }, b: { name: string }) => {
+    const ao = categoryOrder.get(a.name) ?? 999;
+    const bo = categoryOrder.get(b.name) ?? 999;
+    return ao - bo || a.name.localeCompare(b.name);
+  };
+
+  const prioritySections = PRIORITY_META.map((priority) => {
+    const tasks = sortTasks(all.filter(matches).filter((t) => taskPriority(t) === priority.id));
+    const bySegment = new Map<string, Task[]>();
+    for (const t of tasks) {
+      const name = taskSegment(t);
+      bySegment.set(name, [...(bySegment.get(name) ?? []), t]);
     }
-    let g = groups.find((x) => x.name === t.group);
-    if (!g) {
-      g = { name: t.group, tasks: [] };
-      groups.push(g);
-    }
-    g.tasks.push(t);
-  }
-  const groupNames = [...new Set(all.map((t) => t.group))];
+    const segments = [...bySegment.entries()]
+      .map(([name, segmentTasks]) => ({ name, tasks: sortTasks(segmentTasks) }))
+      .sort(sortSegments);
+    return { ...priority, tasks, segments };
+  }).filter((section) => section.tasks.length > 0);
+
+  const open = all.length - completed;
+  const priorityCounts = PRIORITY_META.map((priority) => ({
+    ...priority,
+    total: all.filter((t) => taskPriority(t) === priority.id).length,
+  }));
 
   const toggle = (t: Task) => {
     toggleTask(t.id);
@@ -367,24 +524,29 @@ export function Checklist() {
 
       {all.length > 0 && (
         <Card style={{ marginBottom: 20 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-            <div style={{ fontSize: 14, fontWeight: 700 }}>Progresso geral</div>
-            <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: "-0.02em" }}>{pct}%</div>
-          </div>
-          <div className="prog-bar" style={{ height: 9 }}><i style={{ width: pct + "%" }} /></div>
-          <div style={{ display: "flex", gap: 24, marginTop: 16 }}>
-            {([
-              ["Concluídas", completed, "var(--green-deep)"],
-              ["Pendentes", all.length - completed, "var(--text)"],
-              ["Atrasadas", late, "var(--red)"],
-            ] as [string, number, string][]).map(([label, value, color], i) => (
-              <div key={i}>
-                <div style={{ fontSize: 20, fontWeight: 800, color }}>{value}</div>
-                <div style={{ fontSize: 11.5, color: "var(--dim)", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 600 }}>
-                  {label}
-                </div>
+          <div className="check-overview">
+            <div className="check-overview-main">
+              <div>
+                <div className="check-overline">Progresso do checklist</div>
+                <div className="check-over-title">{pct}% concluído</div>
               </div>
-            ))}
+              <div className="check-over-stats">
+                {([["Abertas", open, "var(--text)"], ["Concluídas", completed, "var(--green-deep)"], ["Atrasadas", late, "var(--red)"]] as [string, number, string][]).map(([label, value, color]) => (
+                  <div className="check-over-stat" key={label}>
+                    <span className="v" style={{ color }}>{value}</span>
+                    <span className="k">{label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="prog-bar" style={{ height: 9 }}><i style={{ width: pct + "%" }} /></div>
+            <div className="check-phase-strip">
+              {priorityCounts.map((priority) => (
+                <span className={"check-priority-chip " + priority.tone} key={priority.id}>
+                  {priority.label} <b>{priority.total}</b>
+                </span>
+              ))}
+            </div>
           </div>
         </Card>
       )}
@@ -406,104 +568,148 @@ export function Checklist() {
           }
         />
       ) : (
-        PHASE_META.map((ph) => {
-          const phaseGroups = byPhase.get(ph.id) ?? [];
-          const phaseTasks = phaseGroups.flatMap((g) => g.tasks);
-          if (phaseTasks.filter(matches).length === 0) return null;
-          const phaseDone = phaseTasks.filter((t) => t.status === "concluida").length;
-          return (
-            <div key={ph.id} className="phase-block">
-              <div className="phase-head">
-                <span className="ph-title">{ph.label}</span>
-                <span className="ph-count">{phaseDone}/{phaseTasks.length}</span>
-              </div>
-              {phaseGroups.map((grp) => {
-                const visible = grp.tasks.filter(matches);
-                if (visible.length === 0) return null;
-                const done = grp.tasks.filter((t) => t.status === "concluida").length;
-                return (
-                  <div key={grp.name} className="checklist">
-                    <div className="task-group-head">
-                      <span className="tg-title">{grp.name}</span>
-                      <span className="tg-count">{done}/{grp.tasks.length}</span>
-                      <span className="tg-line" />
-                    </div>
-                    {visible.map((t) => {
-                      const isDone = t.status === "concluida";
-                      const assignee = memberById(db, t.assignee_id);
-                      return (
-                        <div className={"task" + (isDone ? " done" : "")} key={t.id}>
-                          <span className="checkbox" onClick={() => toggle(t)}>
-                            <Icon name="check" size={14} />
-                          </span>
-                          <div
-                            className="task-main"
-                            role="button"
-                            style={{ cursor: "pointer" }}
-                            onClick={() => setOpenTask(t.id)}
-                          >
-                            <div className="task-name">{t.title}</div>
-                            <div className="task-meta">
-                              {isDone ? (
-                                <Badge tone="green" dot>Concluída</Badge>
-                              ) : isTaskLate(t) ? (
-                                <Badge tone="red" dot>Atrasada</Badge>
-                              ) : (
-                                <Badge tone="gray" dot>Pendente</Badge>
-                              )}
-                              <span className="row" style={{ gap: 5 }}>
-                                <Icon name="clock" size={12} />
-                                {t.due_date ? fmtDateShort(t.due_date) : "sem prazo"}
-                              </span>
-                              {(t.attachments?.length ?? 0) > 0 && (
-                                <span className="row" style={{ gap: 4 }}>
-                                  <Icon name="paperclip" size={12} />{t.attachments!.length}
-                                </span>
-                              )}
-                              {t.description && (
-                                <span className="row" style={{ gap: 4 }}>
-                                  <Icon name="edit" size={12} />nota
-                                </span>
-                              )}
-                              {t.finance_tx_id ? (
-                                <span className="row" style={{ gap: 4, color: "var(--green-deep)" }}>
-                                  <Icon name="wallet" size={12} />lançado
-                                </span>
-                              ) : t.cost_estimate ? (
-                                <span className="row" style={{ gap: 4 }}>
-                                  <Icon name="wallet" size={12} />{fmtMoney(t.cost_estimate)}
-                                </span>
-                              ) : null}
-                            </div>
-                          </div>
-                          <span className="task-assignee row" style={{ gap: 6 }}>
-                            {assignee && <Avatar initials={assignee.initials} size="sm" />}
-                            <Menu
-                              items={[
-                                {
-                                  label: isDone ? "Reabrir tarefa" : "Concluir tarefa",
-                                  onClick: () => toggle(t),
-                                },
-                                {
-                                  label: "Excluir",
-                                  danger: true,
-                                  onClick: () => {
-                                    removeTask(t.id);
-                                    toast("Tarefa excluída");
-                                  },
-                                },
-                              ]}
-                            />
-                          </span>
-                        </div>
-                      );
-                    })}
+        prioritySections.length === 0 ? (
+          <Empty
+            icon="filter"
+            title="Nada nesse filtro"
+            sub="Troque o filtro no topo ou crie uma nova tarefa para este evento."
+          />
+        ) : (
+          <div className="check-board">
+            {prioritySections.map((section) => (
+              <section key={section.id} className={"priority-block " + section.tone}>
+                <div className="priority-head">
+                  <span className="priority-ic"><Icon name={section.icon} size={17} /></span>
+                  <div className="priority-meta">
+                    <div className="priority-title">{section.label}</div>
+                    <div className="priority-sub">{section.sub}</div>
                   </div>
-                );
-              })}
-            </div>
-          );
-        })
+                  <span className="priority-count">{section.tasks.length}</span>
+                </div>
+
+                <div className="priority-segments">
+                  {section.segments.map((grp) => {
+                    const done = grp.tasks.filter((t) => t.status === "concluida").length;
+                    const catPct = grp.tasks.length ? Math.round((done / grp.tasks.length) * 100) : 0;
+                    return (
+                      <section key={grp.name} className="check-cat">
+                        <div className="check-cat-head">
+                          <span className="check-cat-ic"><Icon name={categoryIcon(grp.name)} size={17} /></span>
+                          <div className="check-cat-meta">
+                            <div className="check-cat-title">{grp.name}</div>
+                            <div className="check-cat-sub">{done}/{grp.tasks.length} concluídas</div>
+                          </div>
+                          <div className="check-cat-progress">
+                            <span>{catPct}%</span>
+                            <div className="mini-bar"><i style={{ width: `${catPct}%` }} /></div>
+                          </div>
+                        </div>
+
+                        <div className="check-task-list">
+                          {grp.tasks.map((t) => {
+                            const isDone = t.status === "concluida";
+                            const assignee = memberById(db, t.assignee_id);
+                            const ph = phaseMeta(phaseOf(t, ev));
+                            const hasCost = Boolean(t.finance_tx_id || t.cost_estimate);
+                            return (
+                              <div className={"task task-rich" + (isDone ? " done" : "")} key={t.id}>
+                                <button className="checkbox" onClick={() => toggle(t)} title={isDone ? "Reabrir" : "Concluir"}>
+                                  <Icon name="check" size={14} />
+                                </button>
+                                <div
+                                  className="task-main"
+                                  role="button"
+                                  tabIndex={0}
+                                  onClick={() => setOpenTask(t.id)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter" || e.key === " ") {
+                                      e.preventDefault();
+                                      setOpenTask(t.id);
+                                    }
+                                  }}
+                                >
+                                  <div className="task-topline">
+                                    <div className="task-name">{t.title}</div>
+                                    <span className="task-phase">{ph.short}</span>
+                                  </div>
+                                  <div className="task-meta">
+                                    {isDone ? (
+                                      <Badge tone="green" dot>Concluída</Badge>
+                                    ) : isTaskLate(t) ? (
+                                      <Badge tone="red" dot>Atrasada</Badge>
+                                    ) : (
+                                      <Badge tone="gray" dot>Aberta</Badge>
+                                    )}
+                                    <span className="task-meta-item">
+                                      <Icon name="clock" size={12} />
+                                      {dueText(t)}
+                                    </span>
+                                    {assignee ? (
+                                      <span className="task-meta-item">
+                                        <Avatar initials={assignee.initials} size="sm" />{assignee.name}
+                                      </span>
+                                    ) : (
+                                      <span className="task-meta-item muted">
+                                        <Icon name="users" size={12} />Sem responsável
+                                      </span>
+                                    )}
+                                    {(t.attachments?.length ?? 0) > 0 && (
+                                      <span className="task-meta-item">
+                                        <Icon name="paperclip" size={12} />{t.attachments!.length}
+                                      </span>
+                                    )}
+                                    {t.description && (
+                                      <span className="task-meta-item">
+                                        <Icon name="edit" size={12} />nota
+                                      </span>
+                                    )}
+                                    {hasCost && (
+                                      <span className={"task-meta-item" + (t.finance_tx_id ? " good" : "")}>
+                                        <Icon name="wallet" size={12} />
+                                        {t.finance_tx_id ? "lançado" : fmtMoney(t.cost_estimate ?? 0)}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="task-actions">
+                                  <button
+                                    className="task-icon-btn"
+                                    title="Abrir tarefa"
+                                    onClick={() => setOpenTask(t.id)}
+                                  >
+                                    <Icon name="chevRight" size={15} />
+                                  </button>
+                                  <button
+                                    className="task-icon-btn danger"
+                                    title="Excluir tarefa"
+                                    onClick={() => {
+                                      removeTask(t.id);
+                                      toast("Tarefa excluída");
+                                    }}
+                                  >
+                                    <Icon name="trash" size={15} />
+                                  </button>
+                                  <Menu
+                                    items={[
+                                      {
+                                        label: isDone ? "Reabrir tarefa" : "Concluir tarefa",
+                                        onClick: () => toggle(t),
+                                      },
+                                    ]}
+                                  />
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </section>
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
+          </div>
+        )
       )}
 
       {adding && (
@@ -514,7 +720,24 @@ export function Checklist() {
         />
       )}
 
-      {picking && <TemplatePickerModal event={ev} onClose={() => setPicking(false)} />}
+      {picking && (
+        <TemplatePickerModal
+          event={ev}
+          onClose={() => setPicking(false)}
+          onClickupImport={() => {
+            setPicking(false);
+            setClickupImport(true);
+          }}
+        />
+      )}
+
+      {clickupImport && (
+        <ClickupImportModal
+          eventId={ev.id}
+          eventName={ev.name}
+          onClose={() => setClickupImport(false)}
+        />
+      )}
 
       {saving && (
         <SaveTemplateModal event={ev} taskCount={all.length} onClose={() => setSaving(false)} />

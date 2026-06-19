@@ -30,6 +30,13 @@ const TABS: [string, string][] = [
   ["pendente", "Pendentes"],
   ["checkin", "Check-in"],
 ];
+const TAB_IDS = new Set(TABS.map(([id]) => id));
+
+function tabFromUrl(): string {
+  if (typeof window === "undefined") return "todos";
+  const tab = new URLSearchParams(window.location.search).get("tab");
+  return tab && TAB_IDS.has(tab) ? tab : "todos";
+}
 
 type LeadColumn = { key: string; label: string };
 
@@ -400,7 +407,7 @@ export function Inscritos() {
       ? ""
       : new URLSearchParams(window.location.search).get("q") ?? ""
   );
-  const [tab, setTab] = useState("todos");
+  const [tab, setTab] = useState(() => tabFromUrl());
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
   const [leadOpen, setLeadOpen] = useState<Attendee | null>(null);
@@ -412,8 +419,16 @@ export function Inscritos() {
       setQ((e as CustomEvent<string>).detail);
       setTab("todos");
     };
+    const onTab = (e: Event) => {
+      const next = (e as CustomEvent<string>).detail;
+      if (TAB_IDS.has(next)) setTab(next);
+    };
     window.addEventListener("nexo:search", onSearch);
-    return () => window.removeEventListener("nexo:search", onSearch);
+    window.addEventListener("nexo:tab", onTab);
+    return () => {
+      window.removeEventListener("nexo:search", onSearch);
+      window.removeEventListener("nexo:tab", onTab);
+    };
   }, []);
 
   const ev = selectedEvent(db);
@@ -499,7 +514,7 @@ export function Inscritos() {
     <div className="view">
       <PageHead
         title="Inscritos"
-        sub={`${ev.name} · ${all.length} participantes · ${countOf("confirmado") + countOf("checkin")} confirmados${leadColumnCount > 0 ? ` · ${leadColumnCount} campos de lead` : ""}${symplaSync.link ? ` · Sympla ${symplaSync.busy ? "sincronizando..." : "vinculado"}` : ""}`}
+        sub={`${ev.name} · ${all.length} participantes · ${countOf("confirmado") + countOf("checkin")} confirmados${leadColumnCount > 0 ? ` · ${leadColumnCount} campos de lead` : ""}${symplaSync.link ? " · Sympla vinculado" : ""}`}
         actions={
           <>
             {symplaSync.link && (

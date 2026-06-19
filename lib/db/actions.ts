@@ -3,6 +3,7 @@
 // (sb*). A UI só importa de @/lib/db e não sabe que existe banco.
 
 import type {
+  Activity,
   Attendee,
   AttendeeStatus,
   AppSettings,
@@ -56,11 +57,25 @@ const ws = () => currentWorkspaceId();
 
 type Row = Record<string, unknown>;
 
-function logActivity(icon: string, text: string[]) {
-  const entry = { id: newId(), icon, text, created_at: now() };
-  mutate((s) => ({ ...s, activity: [entry, ...s.activity].slice(0, 50) }));
+/** Registra uma atividade. Com `dedupe`, entradas repetidas da mesma natureza
+   (ex.: o sync automático que roda a cada minuto) ATUALIZAM a entrada mais
+   recente no lugar — evita inundar o feed com linhas idênticas. */
+function logActivity(icon: string, text: string[], dedupe?: string) {
+  let inserted: Activity | null = null;
+  mutate((s) => {
+    const head = s.activity[0];
+    if (dedupe && head && head.dedupe === dedupe) {
+      const entry: Activity = { ...head, icon, text, created_at: now() };
+      return { ...s, activity: [entry, ...s.activity.slice(1)] };
+    }
+    const entry: Activity = { id: newId(), icon, text, created_at: now(), dedupe };
+    inserted = entry;
+    return { ...s, activity: [entry, ...s.activity].slice(0, 50) };
+  });
+  // Persiste só entradas novas (a coalescência é local; será reconciliada
+  // quando o Supabase entrar na fase de sync).
   const w = ws();
-  if (w) sbInsert("activity", activityToRow(w, entry));
+  if (w && inserted) sbInsert("activity", activityToRow(w, inserted));
 }
 
 /** Patch de task (UI) → patch de linha (renomeia group → task_group). */
@@ -494,11 +509,15 @@ export function syncAttendees(eventId: string, drafts: AttendeeDraft[]): Attende
   }
 
   if (added > 0 || updated > 0) {
-    logActivity("📥", [
-      "",
-      `${added} novo${added === 1 ? "" : "s"} / ${updated} atualizado${updated === 1 ? "" : "s"}`,
-      " na sincronizacao de inscritos",
-    ]);
+    logActivity(
+      "📥",
+      [
+        "",
+        `${added} novo${added === 1 ? "" : "s"} / ${updated} atualizado${updated === 1 ? "" : "s"}`,
+        " na sincronização de inscritos",
+      ],
+      "sympla-sync"
+    );
   }
   return { added, skipped, updated };
 }
@@ -1038,6 +1057,92 @@ export type TaskImportDraft = {
   due_date?: string | null;
 };
 
+const IMPORT_GROUP_RULES: { group: string; terms: string[] }[] = [
+  {
+    group: "Conteúdo & Criativos",
+    terms: [
+      "apresentacao", "convite", "conteudo", "copy", "criativo", "arte", "banner",
+      "capa", "branding", "landing", "pagina", "video", "speaker", "palestrante",
+      "post", "reels", "design", "layout", "ppt", "deck",
+    ],
+  },
+  {
+    group: "Inscrições & Público",
+    terms: [
+      "inscricao", "inscrito", "participante", "lead", "lista", "credencial",
+      "cracha", "check-in", "checkin", "sympla", "ticket", "ingresso", "lote",
+      "formulario", "presenca",
+    ],
+  },
+  {
+    group: "Comunicação",
+    terms: [
+      "email", "e-mail", "whatsapp", "comunicacao", "disparo", "mensagem",
+      "lembrete", "confirmacao", "newsletter", "crm", "hubspot", "release",
+    ],
+  },
+  {
+    group: "Comercial & Patrocínios",
+    terms: [
+      "patrocinio", "patrocinador", "sponsor", "parceiro", "comercial", "proposta",
+      "contrapartida", "cota", "stand", "expositor",
+    ],
+  },
+  {
+    group: "Operação & Logística",
+    terms: [
+      "local", "espaco", "hotel", "transporte", "logistica", "fornecedor", "catering",
+      "buffet", "montagem", "desmontagem", "equipe", "eletro", "limpeza", "seguranca",
+      "recepcao", "material", "brinde", "entrega",
+    ],
+  },
+  {
+    group: "Programação & Palco",
+    terms: [
+      "programacao", "agenda", "grade", "palco", "cerimonial", "roteiro", "mestre",
+      "mediador", "painel", "sessao", "ensaio", "passagem de som",
+    ],
+  },
+  {
+    group: "Técnico & Audiovisual",
+    terms: [
+      "tecnico", "audio", "som", "luz", "iluminacao", "microfone", "camera",
+      "streaming", "transmissao", "wifi", "internet", "av", "audiovisual",
+      "credenciamento", "totem",
+    ],
+  },
+  {
+    group: "Financeiro & Jurídico",
+    terms: [
+      "orcamento", "financeiro", "pagamento", "nota", "nf", "contrato", "juridico",
+      "invoice", "custo", "reembolso", "comprovante", "faturamento",
+    ],
+  },
+  {
+    group: "Pós-evento",
+    terms: [
+      "pos", "pos-evento", "pesquisa", "nps", "relatorio", "recap", "follow-up",
+      "follow up", "agradecimento", "certificado", "feedback", "prestacao",
+    ],
+  },
+];
+
+function normalizeImportText(v: string): string {
+  return v
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+export function categorizeChecklistTask(title: string, fallback: string): string {
+  const haystack = normalizeImportText(`${title} ${fallback}`);
+  const found = IMPORT_GROUP_RULES.find((rule) =>
+    rule.terms.some((term) => haystack.includes(normalizeImportText(term)))
+  );
+  if (found) return found.group;
+  return fallback.trim() || "Geral";
+}
+
 /** Importa tarefas para o checklist do evento; deduplica por título. */
 export function importTasks(
   eventId: string,
@@ -1061,7 +1166,7 @@ export function importTasks(
         id: newId(),
         event_id: eventId,
         title: d.title,
-        group: d.group,
+        group: categorizeChecklistTask(d.title, d.group),
         // sem fase explícita a view deriva do prazo (phaseOf) vs. data do evento
         phase: d.phase,
         status: "aberta",

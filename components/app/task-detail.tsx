@@ -27,7 +27,7 @@ import {
   useDb,
 } from "@/lib/db";
 import { compressImage, downloadDataUrl, fileToDataUrl } from "@/lib/files";
-import { daysUntil, fmtMoney } from "@/lib/format";
+import { daysUntil, fmtDateShort, fmtMoney } from "@/lib/format";
 import type { TaskPhase } from "@/types";
 
 /** Posição do prazo na linha do tempo do evento (D-14, Dia D, D+2…). */
@@ -41,6 +41,10 @@ function eventDelta(eventStart?: string, due?: string | null): { dx: string; sub
   if (delta === 0) return { dx: "Dia D", sub: "no dia do evento" };
   if (delta < 0) return { dx: `D-${-delta}`, sub: `${-delta} ${-delta === 1 ? "dia" : "dias"} antes do evento` };
   return { dx: `D+${delta}`, sub: `${delta} ${delta === 1 ? "dia" : "dias"} após o evento` };
+}
+
+function taskPhaseMeta(id: TaskPhase) {
+  return PHASE_META.find((p) => p.id === id) ?? PHASE_META[0];
 }
 
 export function TaskDetail({ taskId, onClose }: { taskId: string; onClose: () => void }) {
@@ -76,6 +80,12 @@ export function TaskDetail({ taskId, onClose }: { taskId: string; onClose: () =>
   ];
   const delta = eventDelta(ev?.starts_at, task.due_date);
   const dueLeft = task.due_date ? daysUntil(task.due_date) : null;
+  const currentPhase = phaseOf(task, ev);
+  const currentPhaseMeta = taskPhaseMeta(currentPhase);
+  const eventDate = ev?.starts_at ? ev.starts_at.slice(0, 10) : "";
+  const dueSummary = task.due_date
+    ? `${late ? "Atrasada · " : ""}${fmtDateShort(task.due_date)}`
+    : "Sem prazo";
 
   const saveTitle = () => {
     const v = title.trim();
@@ -123,9 +133,15 @@ export function TaskDetail({ taskId, onClose }: { taskId: string; onClose: () =>
     onClose();
   };
 
+  const deleteTask = () => {
+    removeTask(task.id);
+    toast("Tarefa excluída");
+    onClose();
+  };
+
   return (
     <div className="task-scrim" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="task-sheet" role="dialog" aria-modal>
+      <div className="task-sheet task-sheet-modern" role="dialog" aria-modal>
         <div className="ts-head">
           <button
             className={"ts-check" + (isDone ? " done" : "")}
@@ -135,7 +151,7 @@ export function TaskDetail({ taskId, onClose }: { taskId: string; onClose: () =>
             <Icon name="check" size={15} />
           </button>
           <div className="ts-head-meta">
-            <span className="ts-eyebrow">{ev?.name ?? "Tarefa"} · {task.group}</span>
+            <span className="ts-eyebrow">{ev?.name ?? "Tarefa"}</span>
             {isDone ? (
               <Badge tone="green" dot>Concluída</Badge>
             ) : late ? (
@@ -144,9 +160,14 @@ export function TaskDetail({ taskId, onClose }: { taskId: string; onClose: () =>
               <Badge tone="gray" dot>Aberta</Badge>
             )}
           </div>
-          <button className="modal-x" onClick={onClose} aria-label="Fechar">
-            <Icon name="x" size={16} />
-          </button>
+          <div className="ts-head-actions">
+            <button className="row-action danger" onClick={deleteTask} title="Excluir tarefa">
+              <Icon name="trash" size={15} />
+            </button>
+            <button className="modal-x" onClick={onClose} aria-label="Fechar">
+              <Icon name="x" size={16} />
+            </button>
+          </div>
         </div>
 
         <input
@@ -158,131 +179,183 @@ export function TaskDetail({ taskId, onClose }: { taskId: string; onClose: () =>
           placeholder="Título da tarefa"
         />
 
+        <div className="ts-quickbar">
+          <span className="ts-chip">
+            <Icon name="grid" size={13} />{task.group}
+          </span>
+          <span className="ts-chip">
+            <Icon name="calendar" size={13} />{currentPhaseMeta.label}
+          </span>
+          <span className={"ts-chip" + (late ? " danger" : "")}>
+            <Icon name="clock" size={13} />{dueSummary}
+          </span>
+          {(linkedTx || task.cost_estimate) && (
+            <span className={"ts-chip" + (linkedTx ? " good" : "")}>
+              <Icon name="wallet" size={13} />
+              {linkedTx ? "No financeiro" : fmtMoney(task.cost_estimate ?? 0)}
+            </span>
+          )}
+        </div>
+
         <div className="ts-body">
           <div className="ts-main">
-            <label className="ts-label">Descrição</label>
-            <textarea
-              className="ts-desc"
-              value={desc}
-              onChange={(e) => setDesc(e.target.value)}
-              onBlur={saveDesc}
-              placeholder="Adicione contexto, links, instruções e decisões da tarefa…"
-              rows={5}
-            />
-
-            <div className="ts-att-head">
-              <label className="ts-label" style={{ margin: 0 }}>
-                Anexos {attachments.length > 0 && <span className="ts-count">{attachments.length}</span>}
-              </label>
-              <button className="btn btn-sm" onClick={() => fileRef.current?.click()}>
-                <Icon name="upload" size={14} />Adicionar
-              </button>
-              <input
-                ref={fileRef}
-                type="file"
-                multiple
-                accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
-                style={{ display: "none" }}
-                onChange={(e) => {
-                  const fs = e.target.files;
-                  e.currentTarget.value = "";
-                  if (fs && fs.length) onFiles(fs);
-                }}
-              />
-            </div>
-
-            {attachments.length === 0 ? (
-              <button className="ts-att-empty" onClick={() => fileRef.current?.click()}>
-                <Icon name="image" size={18} />
-                Clique para anexar imagens e arquivos
-              </button>
-            ) : (
-              <div className="ts-att-grid">
-                {attachments.map((a) => (
-                  <div className="ts-att" key={a.id}>
-                    {a.kind === "image" ? (
-                      <button
-                        className="ts-thumb"
-                        style={{ backgroundImage: `url("${a.data}")` }}
-                        title={`Baixar ${a.name}`}
-                        onClick={() => downloadDataUrl(a.name, a.data)}
-                      />
-                    ) : (
-                      <button
-                        className="ts-thumb ts-thumb-file"
-                        title={`Baixar ${a.name}`}
-                        onClick={() => downloadDataUrl(a.name, a.data)}
-                      >
-                        <Icon name="paperclip" size={18} />
-                      </button>
-                    )}
-                    <span className="ts-att-nm" title={a.name}>{a.name}</span>
-                    <button
-                      className="ts-att-x"
-                      title="Remover anexo"
-                      onClick={() => removeTaskAttachment(task.id, a.id)}
-                    >
-                      <Icon name="x" size={12} />
-                    </button>
-                  </div>
-                ))}
+            <section className="ts-panel ts-desc-panel">
+              <div className="ts-panel-head">
+                <div>
+                  <label className="ts-label">Descrição</label>
+                  <div className="ts-panel-sub">Contexto, links, decisões e instruções operacionais.</div>
+                </div>
               </div>
-            )}
+              <textarea
+                className="ts-desc"
+                value={desc}
+                onChange={(e) => setDesc(e.target.value)}
+                onBlur={saveDesc}
+                placeholder="Cole briefing, links, critérios de aceite ou próximos passos..."
+                rows={8}
+              />
+            </section>
+
+            <section className="ts-panel">
+              <div className="ts-att-head">
+                <div>
+                  <label className="ts-label" style={{ margin: 0 }}>
+                    Anexos {attachments.length > 0 && <span className="ts-count">{attachments.length}</span>}
+                  </label>
+                  <div className="ts-panel-sub">Imagens, PDFs, planilhas e materiais de apoio.</div>
+                </div>
+                <button className="btn btn-sm" onClick={() => fileRef.current?.click()}>
+                  <Icon name="upload" size={14} />Adicionar
+                </button>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  multiple
+                  accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    const fs = e.target.files;
+                    e.currentTarget.value = "";
+                    if (fs && fs.length) onFiles(fs);
+                  }}
+                />
+              </div>
+
+              {attachments.length === 0 ? (
+                <button className="ts-att-empty" onClick={() => fileRef.current?.click()}>
+                  <Icon name="image" size={18} />
+                  Clique para anexar imagens e arquivos
+                </button>
+              ) : (
+                <div className="ts-att-grid">
+                  {attachments.map((a) => (
+                    <div className="ts-att" key={a.id}>
+                      {a.kind === "image" ? (
+                        <button
+                          className="ts-thumb"
+                          style={{ backgroundImage: `url("${a.data}")` }}
+                          title={`Baixar ${a.name}`}
+                          onClick={() => downloadDataUrl(a.name, a.data)}
+                        />
+                      ) : (
+                        <button
+                          className="ts-thumb ts-thumb-file"
+                          title={`Baixar ${a.name}`}
+                          onClick={() => downloadDataUrl(a.name, a.data)}
+                        >
+                          <Icon name="paperclip" size={18} />
+                        </button>
+                      )}
+                      <span className="ts-att-nm" title={a.name}>{a.name}</span>
+                      <button
+                        className="ts-att-x"
+                        title="Remover anexo"
+                        onClick={() => removeTaskAttachment(task.id, a.id)}
+                      >
+                        <Icon name="x" size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
           </div>
 
           <aside className="ts-aside">
-            <div className="ts-prop">
-              <span className="k">Responsável</span>
-              <select
-                className="input"
-                value={task.assignee_id ?? ""}
-                onChange={(e) => updateTask(task.id, { assignee_id: e.target.value || null })}
-              >
-                <option value="">Sem responsável</option>
-                {db.members.map((m) => (
-                  <option key={m.id} value={m.id}>{m.name}</option>
-                ))}
-              </select>
-            </div>
-            <div className="ts-prop">
-              <span className="k">Fase</span>
-              <select
-                className="input"
-                value={phaseOf(task, ev)}
-                onChange={(e) => updateTask(task.id, { phase: e.target.value as TaskPhase })}
-              >
-                {PHASE_META.map((p) => (
-                  <option key={p.id} value={p.id}>{p.label}</option>
-                ))}
-              </select>
-            </div>
-            <div className="ts-prop">
-              <span className="k">Grupo</span>
-              <input
-                className="input"
-                list="ts-groups"
-                defaultValue={task.group}
-                onBlur={(e) => {
-                  const v = e.target.value.trim();
-                  if (v && v !== task.group) updateTask(task.id, { group: v });
-                }}
-              />
-              <datalist id="ts-groups">
-                {groups.map((g) => <option key={g} value={g} />)}
-              </datalist>
-            </div>
-            <div className="ts-prop">
-              <span className="k">Prazo</span>
-              <input
-                className="input"
-                type="date"
-                value={task.due_date ?? ""}
-                onChange={(e) => updateTask(task.id, { due_date: e.target.value || null })}
-              />
-            </div>
+            <section className="ts-panel ts-plan-panel">
+              <div className="ts-panel-title">Planejamento</div>
+              <div className="ts-prop">
+                <span className="k">Responsável</span>
+                <select
+                  className="input"
+                  value={task.assignee_id ?? ""}
+                  onChange={(e) => updateTask(task.id, { assignee_id: e.target.value || null })}
+                >
+                  <option value="">Sem responsável</option>
+                  {db.members.map((m) => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="ts-prop">
+                <span className="k">Fase</span>
+                <div className="ts-phase-pick">
+                  {PHASE_META.map((p) => (
+                    <button
+                      type="button"
+                      key={p.id}
+                      className={currentPhase === p.id ? "active" : ""}
+                      onClick={() => updateTask(task.id, { phase: p.id })}
+                    >
+                      {p.short}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="ts-prop">
+                <span className="k">Categoria</span>
+                <input
+                  className="input"
+                  list="ts-groups"
+                  defaultValue={task.group}
+                  onBlur={(e) => {
+                    const v = e.target.value.trim();
+                    if (v && v !== task.group) updateTask(task.id, { group: v });
+                  }}
+                />
+                <datalist id="ts-groups">
+                  {groups.map((g) => <option key={g} value={g} />)}
+                </datalist>
+              </div>
+
+              <div className="ts-prop">
+                <span className="k">Prazo</span>
+                <input
+                  className="input"
+                  type="date"
+                  value={task.due_date ?? ""}
+                  onChange={(e) => updateTask(task.id, { due_date: e.target.value || null })}
+                />
+                <div className="ts-date-actions">
+                  <button type="button" onClick={() => updateTask(task.id, { due_date: new Date().toISOString().slice(0, 10) })}>
+                    Hoje
+                  </button>
+                  {eventDate && (
+                    <button type="button" onClick={() => updateTask(task.id, { due_date: eventDate, phase: "durante" })}>
+                      Dia do evento
+                    </button>
+                  )}
+                  <button type="button" onClick={() => updateTask(task.id, { due_date: null })}>
+                    Limpar
+                  </button>
+                </div>
+              </div>
+            </section>
 
             <div className="nx-context">
-              <div className="nx-head"><span className="sb-mark" />Contexto Nexo</div>
+              <div className="nx-head"><span className="sb-mark" />Linha do evento</div>
 
               {delta ? (
                 <div className="nx-dx-row">
@@ -306,6 +379,11 @@ export function TaskDetail({ taskId, onClose }: { taskId: string; onClose: () =>
 
               <div className="nx-divider" />
 
+              <span className="k">Evento</span>
+              <div className="nx-hint">{ev?.name ?? "Sem evento selecionado"}</div>
+            </div>
+
+            <section className="ts-panel ts-finance-panel">
               <span className="k">Custo no orçamento</span>
               {linkedTx ? (
                 <div className="nx-linked">
@@ -345,12 +423,11 @@ export function TaskDetail({ taskId, onClose }: { taskId: string; onClose: () =>
                     <Icon name="wallet" size={14} />Lançar no financeiro
                   </button>
                   <p className="nx-note">
-                    A tarefa alimenta o orçamento do evento — só no Nexo o checklist
-                    conversa com o financeiro.
+                    Cria uma saída vinculada a esta tarefa no financeiro do evento.
                   </p>
                 </>
               )}
-            </div>
+            </section>
 
             {assignee && (
               <div className="ts-assignee-foot">
@@ -359,11 +436,7 @@ export function TaskDetail({ taskId, onClose }: { taskId: string; onClose: () =>
             )}
             <button
               className="btn btn-sm ts-delete"
-              onClick={() => {
-                removeTask(task.id);
-                toast("Tarefa excluída");
-                onClose();
-              }}
+              onClick={deleteTask}
             >
               <Icon name="trash" size={14} />Excluir tarefa
             </button>

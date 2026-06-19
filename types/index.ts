@@ -169,6 +169,9 @@ export type Activity = {
   /** Segmentos alternando texto normal/negrito, como no protótipo. */
   text: string[];
   created_at: string;
+  /** Chave de coalescência: entradas repetidas da mesma natureza (ex.: sync
+      automático) atualizam a entrada mais recente em vez de empilhar. */
+  dedupe?: string;
 };
 
 /* ---------- Dashboard customizável (FR pós-MVP) ---------- */

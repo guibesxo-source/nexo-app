@@ -22,6 +22,8 @@ import {
   login,
   logout,
   pushRecentSearch,
+  EVENT_STATUS_META,
+  eventKpis,
   selectEvent,
   selectedEvent,
   setSidebarCollapsed,
@@ -32,7 +34,7 @@ import {
 import { getState } from "@/lib/db/store";
 import { createClient } from "@/lib/supabase/client";
 import { displayNameFromUser } from "@/lib/auth";
-import { fmtDateShort, initialsOf, relTime } from "@/lib/format";
+import { daysUntil, fmtDateShort, initialsOf, relTime } from "@/lib/format";
 
 /** Iniciais de evento: duas primeiras palavras (ex.: "Summit de…" → SD ≠ pessoas). */
 function evInitials(name: string): string {
@@ -82,74 +84,243 @@ const UiCtx = createContext<{ openNewEvent: () => void }>({ openNewEvent: () => 
 export const useUi = () => useContext(UiCtx);
 
 /* ---------- Sidebar ---------- */
-function EventSwitcher() {
+type SubmenuItem = { label: string; icon: string; tab?: string };
+
+const SUBMENUS: Record<string, SubmenuItem[]> = {
+  eventos: [
+    { label: "Todos os eventos", icon: "grid" },
+    { label: "Páginas de inscrição", icon: "link" },
+    { label: "Ingressos & lotes", icon: "ticket" },
+    { label: "Programação", icon: "calendarDays" },
+    { label: "Capas & branding", icon: "image" },
+  ],
+  inscritos: [
+    { label: "Lista de inscritos", icon: "users" },
+    { label: "Check-in", icon: "checkSquare", tab: "checkin" },
+    { label: "Credenciais & crachás", icon: "ticket" },
+    { label: "Listas & segmentos", icon: "filter" },
+    { label: "Comunicação", icon: "mail" },
+  ],
+  financeiro: [
+    { label: "Visão geral", icon: "grid" },
+    { label: "Transações", icon: "wallet" },
+    { label: "Repasses & saques", icon: "download" },
+    { label: "Cupons & descontos", icon: "ticket" },
+    { label: "Notas fiscais", icon: "note" },
+  ],
+  checklist: [
+    { label: "Todas as tarefas", icon: "grid", tab: "todas" },
+    { label: "Tarefas abertas", icon: "clock", tab: "abertas" },
+    { label: "Atrasadas", icon: "bolt", tab: "atrasadas" },
+    { label: "Templates & ClickUp", icon: "sparkle", tab: "templates" },
+    { label: "Nova tarefa", icon: "plus", tab: "nova" },
+  ],
+};
+
+const STATUS_TONE_VARS: Record<string, { bg: string; fg: string }> = {
+  green: { bg: "var(--green-soft)", fg: "var(--green-deep)" },
+  amber: { bg: "var(--amber-soft)", fg: "var(--amber)" },
+  blue: { bg: "var(--blue-soft)", fg: "var(--blue)" },
+  red: { bg: "var(--red-soft)", fg: "var(--red)" },
+  gray: { bg: "var(--panel)", fg: "var(--dim)" },
+};
+
+function countdownLabel(iso: string): string {
+  const d = daysUntil(iso);
+  if (d > 0) return `faltam ${d} dia${d === 1 ? "" : "s"}`;
+  if (d === 0) return "é hoje";
+  const abs = Math.abs(d);
+  return `há ${abs} dia${abs === 1 ? "" : "s"}`;
+}
+
+function EventContext() {
   const db = useDb();
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const ev = selectedEvent(db);
 
   if (!ev) {
     return (
-      <div className="sb-event" onClick={() => router.push("/events")}>
-        <div className="ev-meta">
-          <div className="ev-name">Nenhum evento</div>
-          <div className="ev-sub">Crie o primeiro</div>
+      <>
+        <div className="sb-evctx sb-expanded-only">
+          <button className="sb-event-trigger" onClick={() => router.push("/events")}>
+            <div className="sb-evrow">
+              <div className="sb-evtile empty">+</div>
+              <div className="sb-evtile-meta">
+                <div className="sb-evtile-name">Nenhum evento</div>
+                <div className="sb-evtile-sub">Crie o primeiro</div>
+              </div>
+            </div>
+          </button>
         </div>
-      </div>
+        <div className="sb-evctx sb-collapsed-only">
+          <button className="sb-evmini-tile empty" onClick={() => router.push("/events")}>+</button>
+        </div>
+      </>
     );
   }
 
-  return (
-    <div className="sb-event-wrap">
-      <div className="sb-event" onClick={() => setOpen((o) => !o)}>
-        <span className="ev-dot">{evInitials(ev.name)}</span>
-        <div className="ev-meta">
-          <div className="ev-name">{ev.name}</div>
-          <div className="ev-sub">{fmtDateShort(ev.starts_at)} · {ev.location}</div>
-        </div>
-        <span className="ev-chev"><Icon name="chevDown" size={14} /></span>
+  const k = eventKpis(db, ev.id);
+  const meta = EVENT_STATUS_META[ev.status];
+  const tone = STATUS_TONE_VARS[meta.tone] ?? STATUS_TONE_VARS.gray;
+  const capacityPct = ev.capacity ? Math.min(100, Math.round((k.total / ev.capacity) * 100)) : 0;
+  const checklistPct = k.tasksTotal ? Math.round((k.tasksDone / k.tasksTotal) * 100) : 0;
+  const checklistColor = checklistPct < 40 ? "var(--amber)" : "var(--green-deep)";
+  const metaLine = `${fmtDateShort(ev.starts_at)} · ${ev.location}`;
+  const ringBg = `conic-gradient(var(--green-deep) 0 ${capacityPct}%, var(--ring-track) ${capacityPct}% 100%)`;
+
+  const header = (
+    <div className="sb-evrow">
+      <div className="sb-evtile" style={{ background: ev.cover }}>{evInitials(ev.name)}</div>
+      <div className="sb-evtile-meta">
+        <div className="sb-evtile-name">{ev.name}</div>
+        <div className="sb-evtile-sub">{metaLine}</div>
       </div>
-      {open && (
-        <>
-          <span className="menu-scrim" onClick={() => setOpen(false)} />
-          <div className="sb-event-pop">
-            {db.events.map((e) => (
-              <button
-                key={e.id}
-                className={"sb-event-opt" + (e.id === ev.id ? " active" : "")}
-                onClick={() => { selectEvent(e.id); setOpen(false); }}
-              >
-                <span className="ev-dot">{evInitials(e.name)}</span>
-                <span style={{ flex: 1, minWidth: 0 }}>
-                  {e.name}
-                  <span className="sub">{fmtDateShort(e.starts_at)} · {e.location}</span>
-                </span>
-              </button>
-            ))}
-            <button
-              className="sb-event-opt"
-              style={{ color: "var(--green-deep)" }}
-              onClick={() => { setOpen(false); router.push("/events"); }}
-            >
-              Ver todos os eventos →
-            </button>
-          </div>
-        </>
-      )}
     </div>
+  );
+
+  const stats = (
+    <div className="sb-evstats">
+      <div className="sb-evring" style={{ background: ringBg }}><span>{capacityPct}%</span></div>
+      <div className="sb-evstats-meta">
+        <div className="sb-evstatus-row">
+          <span className="sb-evbadge" style={{ background: tone.bg, color: tone.fg }}><i />{meta.label}</span>
+          <span className="sb-evcountdown"><Icon name="clock" size={12} />{countdownLabel(ev.starts_at)}</span>
+        </div>
+        <div className="sb-evchk-row">
+          <span className="sb-evchk-lbl">Checklist</span>
+          <span className="sb-evchk-val">{checklistPct}%</span>
+        </div>
+        <div className="sb-evchk-track"><i style={{ width: `${checklistPct}%`, background: checklistColor }} /></div>
+      </div>
+    </div>
+  );
+
+  return (
+    <>
+      <div className="sb-evctx sb-expanded-only">
+        <div className={"sb-event-trigger" + (detailsOpen ? " details-open" : " details-closed")}>
+          <button className="sb-evhead" onClick={() => setOpen((o) => !o)}>
+            <div className="sb-evtile" style={{ background: ev.cover }}>{evInitials(ev.name)}</div>
+            <div className="sb-evtile-meta">
+              <div className="sb-evtile-name">{ev.name}</div>
+              <div className="sb-evtile-sub">{metaLine}</div>
+            </div>
+            <span className={"sb-evchev" + (open ? " open" : "")}><Icon name="chevDown" size={15} /></span>
+          </button>
+
+          {detailsOpen ? (
+            <>
+              <div className="sb-evsep" />
+              {stats}
+              <button
+                className="sb-evdetails-toggle"
+                title="Recolher detalhes"
+                onClick={() => setDetailsOpen(false)}
+              >
+                <Icon name="chevUp" size={13} />
+              </button>
+            </>
+          ) : (
+            <div className="sb-evcompact">
+              <span className="sb-evbadge" style={{ background: tone.bg, color: tone.fg }}><i />{meta.label}</span>
+              <span className="sb-evcountdown"><Icon name="clock" size={12} />{countdownLabel(ev.starts_at)}</span>
+              <button
+                className="sb-evdetails-toggle"
+                title="Mostrar detalhes"
+                onClick={() => setDetailsOpen(true)}
+              >
+                <Icon name="chevDown" size={13} />
+              </button>
+            </div>
+          )}
+        </div>
+        {open && (
+          <>
+            <span className="menu-scrim" onClick={() => setOpen(false)} />
+            <div className="sb-evpop">
+              <div className="sb-evpop-head">Trocar de evento</div>
+              {db.events.map((event) => {
+                const eventMeta = EVENT_STATUS_META[event.status];
+                const eventTone = STATUS_TONE_VARS[eventMeta.tone] ?? STATUS_TONE_VARS.gray;
+                return (
+                  <button
+                    key={event.id}
+                    className={"sb-evpop-opt" + (event.id === ev.id ? " active" : "")}
+                    onClick={() => { selectEvent(event.id); setOpen(false); }}
+                  >
+                    <div className="sb-evtile sm" style={{ background: event.cover }}>{evInitials(event.name)}</div>
+                    <div className="sb-evtile-meta">
+                      <div className="sb-evtile-name">{event.name}</div>
+                      <div className="sb-evtile-sub">{fmtDateShort(event.starts_at)} · {event.location}</div>
+                    </div>
+                    <span className="sb-evbadge sm" style={{ background: eventTone.bg, color: eventTone.fg }}>
+                      <i />{eventMeta.label}
+                    </span>
+                  </button>
+                );
+              })}
+              <div className="sb-evpop-sep" />
+              <button className="sb-evpop-all" onClick={() => { setOpen(false); router.push("/events"); }}>
+                <Icon name="grid" size={15} />Ver todos os eventos
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="sb-evctx sb-collapsed-only">
+        <div className="sb-event-mini">
+          <div className="sb-evmini-tile" style={{ background: ev.cover }}>{evInitials(ev.name)}</div>
+          <span className="sb-evmini-dot" style={{ background: tone.fg }} />
+          <div className="sb-flyout sb-evflyout">
+            {header}
+            <div className="sb-evsep" />
+            {stats}
+          </div>
+        </div>
+      </div>
+    </>
   );
 }
 
+type NavItem = {
+  id: string;
+  label: string;
+  icon: string;
+  count: number;
+  warn: boolean;
+};
+
 function Sidebar({ active, onNav, open, collapsed, onToggleCollapse }: {
-  active: string; onNav: (id: string) => void; open: boolean; collapsed: boolean;
+  active: string; onNav: (id: string, query?: string) => void; open: boolean; collapsed: boolean;
   onToggleCollapse: () => void;
 }) {
   const db = useDb();
   const router = useRouter();
   const counts = sidebarCounts(db);
   const user = currentUser(db);
+  const [openSubs, setOpenSubs] = useState<Record<string, boolean>>({});
+  const [dismissedFlyout, setDismissedFlyout] = useState<string | null>(null);
 
-  const nav = [
+  const subOpen = (id: string) => openSubs[id] ?? id === active;
+  const toggleSub = (id: string) => setOpenSubs((state) => ({ ...state, [id]: !subOpen(id) }));
+  const navSub = (parent: string, tab?: string) => {
+    onNav(parent, tab ? `tab=${tab}` : undefined);
+    if (collapsed) {
+      setDismissedFlyout(parent);
+      (document.activeElement as HTMLElement | null)?.blur();
+    }
+    if (parent === "inscritos") {
+      window.dispatchEvent(new CustomEvent("nexo:tab", { detail: tab ?? "todos" }));
+    }
+    if (parent === "checklist") {
+      window.dispatchEvent(new CustomEvent("nexo:checklist", { detail: tab ?? "todas" }));
+    }
+  };
+
+  const nav1: NavItem[] = [
     { id: "dashboard", label: "Dashboard", icon: "grid", count: 0, warn: false },
     { id: "eventos", label: "Eventos", icon: "calendar", count: counts.events, warn: false },
     { id: "calendario", label: "Calendário", icon: "calendarDays", count: 0, warn: false },
@@ -162,66 +333,114 @@ function Sidebar({ active, onNav, open, collapsed, onToggleCollapse }: {
     },
     { id: "arquivos", label: "Arquivos", icon: "paperclip", count: 0, warn: false },
   ];
-  const nav2 = [
-    { id: "membros", label: "Membros", icon: "team" },
-    { id: "integracoes", label: "APIs & Integrações", icon: "link" },
-    { id: "config", label: "Configurações", icon: "settings" },
+  const nav2: NavItem[] = [
+    { id: "membros", label: "Membros", icon: "team", count: 0, warn: false },
+    { id: "integracoes", label: "APIs & Integrações", icon: "link", count: 0, warn: false },
+    { id: "config", label: "Configurações", icon: "settings", count: 0, warn: false },
   ];
 
-  return (
-    <aside className={"sidebar" + (open ? " open" : "") + (collapsed ? " collapsed" : "")}>
+  const renderRow = (it: NavItem) => {
+    const hasSub = !!SUBMENUS[it.id];
+    const showSubmenu = hasSub && (subOpen(it.id) || collapsed);
+    return (
       <div
-        className="sb-brand"
-        role="button"
-        title="Ir para o dashboard"
-        onClick={() => onNav("dashboard")}
+        key={it.id}
+        className={"sb-navitem" + (dismissedFlyout === it.id ? " flyout-dismissed" : "")}
+        onMouseLeave={() => dismissedFlyout === it.id && setDismissedFlyout(null)}
       >
-        <span className="sb-mark" /><span className="sb-brand-text">Nexo</span>
+        <button
+          className="sb-row"
+          data-active={active === it.id ? "true" : "false"}
+          onClick={() => {
+            onNav(it.id);
+            if (hasSub) setOpenSubs((state) => ({ ...state, [it.id]: true }));
+          }}
+        >
+          <span className="sb-ico"><Icon name={it.icon} /></span>
+          <span className="sb-text sb-row-label">{it.label}</span>
+          {it.count > 0 && <span className={"sb-text sb-pill-counter" + (it.warn ? " warn" : "")}>{it.count}</span>}
+          {it.count > 0 && <span className={"sb-dot-counter" + (it.warn ? " warn" : "")} />}
+          {hasSub ? (
+            <span
+              className={"sb-text sb-chev" + (subOpen(it.id) ? " open" : "")}
+              onClick={(event) => { event.stopPropagation(); toggleSub(it.id); }}
+            >
+              <Icon name="chevDown" size={14} />
+            </span>
+          ) : (
+            <span className="sb-active-bar" />
+          )}
+          <span className="sb-tooltip">{it.label}{it.count > 0 ? ` · ${it.count}` : ""}</span>
+        </button>
+        {showSubmenu && (
+          <div className="sb-sublist">
+            <span className="sb-subline" />
+            {SUBMENUS[it.id].map((sub) => (
+              <button
+                key={sub.label}
+                className="sb-row sb-sub"
+                title={collapsed ? sub.label : undefined}
+                onClick={() => navSub(it.id, sub.tab)}
+              >
+                <span className="sb-ico"><Icon name={sub.icon} size={15} /></span>
+                <span className="sb-text">{sub.label}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const wsName = db.workspace.name || "Workspace";
+  const totalEvents = db.events.length;
+  const activeEvents = counts.events;
+  const planPct = totalEvents > 0 ? Math.round((activeEvents / totalEvents) * 100) : 0;
+
+  return (
+    <aside className={"sidebar nexo-sb" + (open ? " open" : "") + (collapsed ? " collapsed" : "")}>
+      <div className="sb-brand" role="button" title="Ir para o dashboard" onClick={() => onNav("dashboard")}>
+        <span className="sb-mark" />
+        <span className="sb-text sb-brand-text">Nexo</span>
       </div>
 
-      <EventSwitcher />
+      <EventContext />
 
       <nav className="sb-nav">
-        {nav.map((it) => (
-          <a
-            key={it.id}
-            className={"sb-link" + (active === it.id ? " active" : "")}
-            onClick={() => onNav(it.id)}
-            title={collapsed ? it.label : undefined}
-          >
-            <span className="sb-ic"><Icon name={it.icon} /></span>
-            <span className="sb-label">{it.label}</span>
-            {it.count > 0 && <span className={"count" + (it.warn ? " warn" : "")}>{it.count}</span>}
-          </a>
-        ))}
-
-        <div className="sb-section">Organização</div>
-        {nav2.map((it) => (
-          <a
-            key={it.id}
-            className={"sb-link" + (active === it.id ? " active" : "")}
-            onClick={() => onNav(it.id)}
-            title={collapsed ? it.label : undefined}
-          >
-            <span className="sb-ic"><Icon name={it.icon} /></span>
-            <span className="sb-label">{it.label}</span>
-          </a>
-        ))}
+        {nav1.map(renderRow)}
+        <div className="sb-section sb-expanded-only">Organização</div>
+        <div className="sb-section-line sb-collapsed-only" />
+        {nav2.map(renderRow)}
       </nav>
 
       <div className="sb-foot">
-        <button
-          className="sb-link sb-collapse-btn"
-          onClick={onToggleCollapse}
-          title={collapsed ? "Expandir menu" : "Recolher menu"}
-        >
-          <span className="sb-ic"><Icon name={collapsed ? "chevRight" : "chevLeft"} /></span>
-          <span className="sb-label">Recolher menu</span>
+        <button className="sb-row sb-collapse-row" onClick={onToggleCollapse}>
+          <span className={"sb-ico sb-collapse-ico" + (collapsed ? " flipped" : "")}>
+            <Icon name="chevLeft" size={17} />
+          </span>
+          <span className="sb-text">Recolher menu</span>
+          <span className="sb-tooltip">{collapsed ? "Expandir menu" : "Recolher menu"}</span>
         </button>
-        <div className="sb-user">
+
+        <div className="sb-plan sb-expanded-only">
+          <div className="sb-plan-logo">{wsName.charAt(0).toUpperCase()}</div>
+          <div className="sb-plan-meta">
+            <div className="sb-plan-top">
+              <span className="sb-plan-name">{wsName}</span>
+              <span className="sb-plan-badge">Beta</span>
+            </div>
+            <div className="sb-plan-bar-row">
+              <div className="sb-plan-bar"><i style={{ width: `${planPct}%` }} /></div>
+              <span className="sb-plan-count">{activeEvents}/{totalEvents}</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="sb-foot-sep sb-expanded-only" />
+
+        <div className="sb-user sb-row">
           <span
             className="ava"
-            title={collapsed ? (user?.name ?? "") : undefined}
             style={
               user?.avatar
                 ? { backgroundImage: `url("${user.avatar}")`, backgroundSize: "cover", backgroundPosition: "center" }
@@ -230,12 +449,12 @@ function Sidebar({ active, onNav, open, collapsed, onToggleCollapse }: {
           >
             {user?.avatar ? "" : (user?.initials ?? "?")}
           </span>
-          <div className="u-meta">
+          <div className="sb-text u-meta">
             <div className="u-name">{user?.name ?? "—"}</div>
             <div className="u-mail">{user?.email ?? ""}</div>
           </div>
           <button
-            className="row-action"
+            className="sb-text u-logout"
             title="Sair"
             onClick={async () => {
               await createClient().auth.signOut();
@@ -245,6 +464,7 @@ function Sidebar({ active, onNav, open, collapsed, onToggleCollapse }: {
           >
             <Icon name="logout" size={16} />
           </button>
+          <span className="sb-tooltip">{(user?.name ?? "") + " · Sair"}</span>
         </div>
       </div>
     </aside>
@@ -577,9 +797,10 @@ export function AppShell({ children }: { children: ReactNode }) {
     document.querySelector(".content")?.scrollTo({ top: 0 });
   }, [pathname]);
 
-  const go = (id: string) => {
+  const go = (id: string, query?: string) => {
     setMenuOpen(false);
-    router.push(ROUTES[id] || ROUTES.dashboard);
+    const path = ROUTES[id] || ROUTES.dashboard;
+    router.push(query ? `${path}?${query}` : path);
   };
 
   if (!ready || authed === null) return null; // carregando workspace
