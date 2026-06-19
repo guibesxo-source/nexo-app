@@ -61,11 +61,22 @@ v4 sem precisar mexer no `hbspt.forms.create`.
       }).catch(function () {});
     } catch (e) {}
   }
+  function fromPayload(d) {
+    if (Array.isArray(d)) return d;
+    if (d && Array.isArray(d.submissionValues)) return d.submissionValues;
+    if (d && d.submissionValues && typeof d.submissionValues === "object")
+      return Object.keys(d.submissionValues).map(function (k) { return { name: k, value: d.submissionValues[k] }; });
+    return [];
+  }
   window.addEventListener("message", function (e) {
     if (!e.data || e.data.type !== "hsFormCallback") return;
-    if (e.data.eventName !== "onFormSubmit") return; // antes de limpar os campos
-    var form = document.querySelector("form.hs-form") || document.querySelector(".hs-form form") || document.querySelector("form");
-    send(collect(form));
+    if (e.data.eventName !== "onFormSubmit" && e.data.eventName !== "onFormSubmitted") return;
+    var fields = fromPayload(e.data.data); // funciona com formulário em iframe
+    if (!fields.length) {                  // embed inline: lê os inputs do DOM
+      var form = document.querySelector("form.hs-form") || document.querySelector(".hs-form form") || document.querySelector("form");
+      fields = collect(form);
+    }
+    send(fields);
   });
 })();
 </script>

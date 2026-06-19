@@ -7,6 +7,7 @@ import {
 } from "@/components/app/kit";
 import { ImportAttendeesModal } from "@/components/app/import-attendees";
 import { useSymplaAutoSync } from "@/components/app/sympla-sync";
+import { useHubspotAutoRefresh } from "@/components/app/hubspot-sync";
 import {
   addAttendee,
   ATTENDEE_STATUS_META,
@@ -433,6 +434,7 @@ export function Inscritos() {
 
   const ev = selectedEvent(db);
   const symplaSync = useSymplaAutoSync(ev?.id ?? null);
+  const webhookSync = useHubspotAutoRefresh(ev?.id ?? null);
   const all = ev ? attendeesOf(db, ev.id).filter((a) => a.status !== "cancelado") : [];
   const leadColumnCount = leadColumnsOf(all).length;
   const ticketTones = ticketToneMap(all);
@@ -514,9 +516,29 @@ export function Inscritos() {
     <div className="view">
       <PageHead
         title="Inscritos"
-        sub={`${ev.name} · ${all.length} participantes · ${countOf("confirmado") + countOf("checkin")} confirmados${leadColumnCount > 0 ? ` · ${leadColumnCount} campos de lead` : ""}${symplaSync.link ? " · Sympla vinculado" : ""}`}
+        sub={`${ev.name} · ${all.length} participantes · ${countOf("confirmado") + countOf("checkin")} confirmados${leadColumnCount > 0 ? ` · ${leadColumnCount} campos de lead` : ""}${symplaSync.link ? " · Sympla vinculado" : ""}${webhookSync.active ? " · Recebendo via HubSpot" : ""}`}
         actions={
           <>
+            {webhookSync.active && (
+              <button
+                className={"btn btn-sync" + (webhookSync.busy ? " busy" : "")}
+                onClick={async () => {
+                  const r = await webhookSync.refreshNow();
+                  if (r) {
+                    toast(
+                      r.added > 0
+                        ? `${r.added} novo${r.added === 1 ? "" : "s"} inscrito${r.added === 1 ? "" : "s"} do HubSpot`
+                        : "Lista de inscritos já está em dia"
+                    );
+                  }
+                }}
+                disabled={webhookSync.busy}
+                title="Buscar inscritos recebidos pelo formulário do HubSpot"
+              >
+                <Icon name="refresh" size={15} />
+                <span className="btn-sync-label">{webhookSync.busy ? "Atualizando" : "Atualizar"}</span>
+              </button>
+            )}
             {symplaSync.link && (
               <button
                 className={"btn btn-sync" + (symplaSync.busy ? " busy" : "")}

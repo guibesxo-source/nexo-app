@@ -18,6 +18,6 @@ export function useHydrated(): boolean {
   return useSyncExternalStore(subscribe, isHydrated, () => false);
 }
 
-export { hydrate, resetDemo, saveNow, type DbState } from "./store";
+export { hydrate, refreshAttendees, resetDemo, saveNow, type DbState } from "./store";
 export * from "./actions";
 export * from "./derived";

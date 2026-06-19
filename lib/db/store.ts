@@ -274,6 +274,33 @@ export async function rehydrate() {
   await hydrate();
 }
 
+/**
+ * Relê só os inscritos do banco e mescla no estado (sem tocar em `hydrated`, pra
+ * não piscar a tela). É o equivalente, para o HubSpot *sem API*, ao sync do
+ * Sympla: o webhook já empurrou os inscritos pro Postgres; aqui a UI apenas relê.
+ * Retorna quantos são novos em relação ao estado atual.
+ */
+export async function refreshAttendees(): Promise<{ added: number; total: number } | null> {
+  if (!workspaceId || typeof window === "undefined") return null;
+  const { data, error } = await client()
+    .from("attendees")
+    .select("*")
+    .order("created_at", { ascending: false });
+  if (error) {
+    logErr("refresh attendees", error);
+    return null;
+  }
+  const fallback = state.settings.attendee_lead_fields ?? {};
+  const next = ((data ?? []) as Row[]).map((r) => {
+    const a = map.rowToAttendee(r);
+    return { ...a, lead_fields: a.lead_fields?.length ? a.lead_fields : fallback[a.id] ?? [] };
+  });
+  const beforeIds = new Set(state.attendees.map((a) => a.id));
+  const added = next.filter((a) => !beforeIds.has(a.id)).length;
+  mutate((s) => ({ ...s, attendees: next }));
+  return { added, total: next.length };
+}
+
 /** Logout: limpa o estado em memória e volta ao seed neutro (o signOut é da UI). */
 export function clearSession() {
   workspaceId = null;

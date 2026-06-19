@@ -22,10 +22,7 @@ import {
   login,
   logout,
   pushRecentSearch,
-  EVENT_STATUS_META,
-  eventKpis,
   selectEvent,
-  selectedEvent,
   setSidebarCollapsed,
   sidebarCounts,
   useDb,
@@ -34,18 +31,7 @@ import {
 import { getState } from "@/lib/db/store";
 import { createClient } from "@/lib/supabase/client";
 import { displayNameFromUser } from "@/lib/auth";
-import { daysUntil, fmtDateShort, initialsOf, relTime } from "@/lib/format";
-
-/** Iniciais de evento: duas primeiras palavras (ex.: "Summit de…" → SD ≠ pessoas). */
-function evInitials(name: string): string {
-  return name
-    .split(/\s+/)
-    .filter((w) => /^\p{L}/u.test(w))
-    .slice(0, 2)
-    .map((w) => w[0])
-    .join("")
-    .toUpperCase() || name.slice(0, 2).toUpperCase();
-}
+import { fmtDateShort, initialsOf, relTime } from "@/lib/format";
 
 export const ROUTES: Record<string, string> = {
   dashboard: "/dashboard",
@@ -116,174 +102,6 @@ const SUBMENUS: Record<string, SubmenuItem[]> = {
     { label: "Nova tarefa", icon: "plus", tab: "nova" },
   ],
 };
-
-const STATUS_TONE_VARS: Record<string, { bg: string; fg: string }> = {
-  green: { bg: "var(--green-soft)", fg: "var(--green-deep)" },
-  amber: { bg: "var(--amber-soft)", fg: "var(--amber)" },
-  blue: { bg: "var(--blue-soft)", fg: "var(--blue)" },
-  red: { bg: "var(--red-soft)", fg: "var(--red)" },
-  gray: { bg: "var(--panel)", fg: "var(--dim)" },
-};
-
-function countdownLabel(iso: string): string {
-  const d = daysUntil(iso);
-  if (d > 0) return `faltam ${d} dia${d === 1 ? "" : "s"}`;
-  if (d === 0) return "é hoje";
-  const abs = Math.abs(d);
-  return `há ${abs} dia${abs === 1 ? "" : "s"}`;
-}
-
-function EventContext() {
-  const db = useDb();
-  const router = useRouter();
-  const [open, setOpen] = useState(false);
-  const [detailsOpen, setDetailsOpen] = useState(false);
-  const ev = selectedEvent(db);
-
-  if (!ev) {
-    return (
-      <>
-        <div className="sb-evctx sb-expanded-only">
-          <button className="sb-event-trigger" onClick={() => router.push("/events")}>
-            <div className="sb-evrow">
-              <div className="sb-evtile empty">+</div>
-              <div className="sb-evtile-meta">
-                <div className="sb-evtile-name">Nenhum evento</div>
-                <div className="sb-evtile-sub">Crie o primeiro</div>
-              </div>
-            </div>
-          </button>
-        </div>
-        <div className="sb-evctx sb-collapsed-only">
-          <button className="sb-evmini-tile empty" onClick={() => router.push("/events")}>+</button>
-        </div>
-      </>
-    );
-  }
-
-  const k = eventKpis(db, ev.id);
-  const meta = EVENT_STATUS_META[ev.status];
-  const tone = STATUS_TONE_VARS[meta.tone] ?? STATUS_TONE_VARS.gray;
-  const capacityPct = ev.capacity ? Math.min(100, Math.round((k.total / ev.capacity) * 100)) : 0;
-  const checklistPct = k.tasksTotal ? Math.round((k.tasksDone / k.tasksTotal) * 100) : 0;
-  const checklistColor = checklistPct < 40 ? "var(--amber)" : "var(--green-deep)";
-  const metaLine = `${fmtDateShort(ev.starts_at)} · ${ev.location}`;
-  const ringBg = `conic-gradient(var(--green-deep) 0 ${capacityPct}%, var(--ring-track) ${capacityPct}% 100%)`;
-
-  const header = (
-    <div className="sb-evrow">
-      <div className="sb-evtile" style={{ background: ev.cover }}>{evInitials(ev.name)}</div>
-      <div className="sb-evtile-meta">
-        <div className="sb-evtile-name">{ev.name}</div>
-        <div className="sb-evtile-sub">{metaLine}</div>
-      </div>
-    </div>
-  );
-
-  const stats = (
-    <div className="sb-evstats">
-      <div className="sb-evring" style={{ background: ringBg }}><span>{capacityPct}%</span></div>
-      <div className="sb-evstats-meta">
-        <div className="sb-evstatus-row">
-          <span className="sb-evbadge" style={{ background: tone.bg, color: tone.fg }}><i />{meta.label}</span>
-          <span className="sb-evcountdown"><Icon name="clock" size={12} />{countdownLabel(ev.starts_at)}</span>
-        </div>
-        <div className="sb-evchk-row">
-          <span className="sb-evchk-lbl">Checklist</span>
-          <span className="sb-evchk-val">{checklistPct}%</span>
-        </div>
-        <div className="sb-evchk-track"><i style={{ width: `${checklistPct}%`, background: checklistColor }} /></div>
-      </div>
-    </div>
-  );
-
-  return (
-    <>
-      <div className="sb-evctx sb-expanded-only">
-        <div className={"sb-event-trigger" + (detailsOpen ? " details-open" : " details-closed")}>
-          <button className="sb-evhead" onClick={() => setOpen((o) => !o)}>
-            <div className="sb-evtile" style={{ background: ev.cover }}>{evInitials(ev.name)}</div>
-            <div className="sb-evtile-meta">
-              <div className="sb-evtile-name">{ev.name}</div>
-              <div className="sb-evtile-sub">{metaLine}</div>
-            </div>
-            <span className={"sb-evchev" + (open ? " open" : "")}><Icon name="chevDown" size={15} /></span>
-          </button>
-
-          {detailsOpen ? (
-            <>
-              <div className="sb-evsep" />
-              {stats}
-              <button
-                className="sb-evdetails-toggle"
-                title="Recolher detalhes"
-                onClick={() => setDetailsOpen(false)}
-              >
-                <Icon name="chevUp" size={13} />
-              </button>
-            </>
-          ) : (
-            <div className="sb-evcompact">
-              <span className="sb-evbadge" style={{ background: tone.bg, color: tone.fg }}><i />{meta.label}</span>
-              <span className="sb-evcountdown"><Icon name="clock" size={12} />{countdownLabel(ev.starts_at)}</span>
-              <button
-                className="sb-evdetails-toggle"
-                title="Mostrar detalhes"
-                onClick={() => setDetailsOpen(true)}
-              >
-                <Icon name="chevDown" size={13} />
-              </button>
-            </div>
-          )}
-        </div>
-        {open && (
-          <>
-            <span className="menu-scrim" onClick={() => setOpen(false)} />
-            <div className="sb-evpop">
-              <div className="sb-evpop-head">Trocar de evento</div>
-              {db.events.map((event) => {
-                const eventMeta = EVENT_STATUS_META[event.status];
-                const eventTone = STATUS_TONE_VARS[eventMeta.tone] ?? STATUS_TONE_VARS.gray;
-                return (
-                  <button
-                    key={event.id}
-                    className={"sb-evpop-opt" + (event.id === ev.id ? " active" : "")}
-                    onClick={() => { selectEvent(event.id); setOpen(false); }}
-                  >
-                    <div className="sb-evtile sm" style={{ background: event.cover }}>{evInitials(event.name)}</div>
-                    <div className="sb-evtile-meta">
-                      <div className="sb-evtile-name">{event.name}</div>
-                      <div className="sb-evtile-sub">{fmtDateShort(event.starts_at)} · {event.location}</div>
-                    </div>
-                    <span className="sb-evbadge sm" style={{ background: eventTone.bg, color: eventTone.fg }}>
-                      <i />{eventMeta.label}
-                    </span>
-                  </button>
-                );
-              })}
-              <div className="sb-evpop-sep" />
-              <button className="sb-evpop-all" onClick={() => { setOpen(false); router.push("/events"); }}>
-                <Icon name="grid" size={15} />Ver todos os eventos
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-
-      <div className="sb-evctx sb-collapsed-only">
-        <div className="sb-event-mini">
-          <div className="sb-evmini-tile" style={{ background: ev.cover }}>{evInitials(ev.name)}</div>
-          <span className="sb-evmini-dot" style={{ background: tone.fg }} />
-          <div className="sb-flyout sb-evflyout">
-            {header}
-            <div className="sb-evsep" />
-            {stats}
-          </div>
-        </div>
-      </div>
-    </>
-  );
-}
 
 type NavItem = {
   id: string;
@@ -403,8 +221,6 @@ function Sidebar({ active, onNav, open, collapsed, onToggleCollapse }: {
         <span className="sb-mark" />
         <span className="sb-text sb-brand-text">Nexo</span>
       </div>
-
-      <EventContext />
 
       <nav className="sb-nav">
         {nav1.map(renderRow)}
