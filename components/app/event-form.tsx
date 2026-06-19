@@ -3,7 +3,17 @@
 /* Modal de criar/editar evento (FR-B1) — Zod na borda do formulário. */
 import { useRef, useState } from "react";
 import { Field, Icon, Modal, MoneyInput, useToast } from "@/components/app/kit";
-import { allTemplates, applyTemplate, createEvent, EVENT_COVERS, updateEvent, useDb } from "@/lib/db";
+import {
+  allTemplates,
+  applyTemplate,
+  createEvent,
+  createHubspotIngest,
+  EVENT_COVERS,
+  updateEvent,
+  useDb,
+} from "@/lib/db";
+import { HubspotWebhookModal } from "@/components/app/hubspot-webhook";
+import { SymplaEventsModal } from "@/components/app/sympla-events";
 import { eventSchema } from "@/lib/validations/event";
 import { compressImage } from "@/lib/files";
 import type { Event, EventPriority, EventStatus } from "@/types";
@@ -38,6 +48,14 @@ export function EventFormModal({ event, onClose }: { event?: Event; onClose: () 
   const templates = allTemplates(db);
   const [templateId, setTemplateId] = useState("");
   const [templateTouched, setTemplateTouched] = useState(false);
+
+  // Integração inicial (só na criação): após criar o evento, encaminha pro fluxo
+  // da integração escolhida — HubSpot (gera o webhook + snippet) ou Sympla
+  // (abre a importação para vincular este evento).
+  const [integration, setIntegration] = useState("");
+  const [handoff, setHandoff] = useState<
+    { id: string; name: string; integration: "hubspot" | "sympla" } | null
+  >(null);
 
   const set = (key: keyof typeof form) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
@@ -88,18 +106,43 @@ export function EventFormModal({ event, onClose }: { event?: Event; onClose: () 
     if (event) {
       updateEvent(event.id, parsed.data);
       toast("Evento atualizado");
-    } else {
-      const id = createEvent(parsed.data);
-      const tpl = templates.find((t) => t.id === templateId);
-      if (tpl) {
-        const n = applyTemplate(id, tpl);
-        toast(`Evento criado · ${n} ${n === 1 ? "tarefa" : "tarefas"} no checklist`);
-      } else {
-        toast("Evento criado");
-      }
+      onClose();
+      return;
     }
+
+    const id = createEvent(parsed.data);
+    const tpl = templates.find((t) => t.id === templateId);
+    const n = tpl ? applyTemplate(id, tpl) : 0;
+
+    // Handoff para a integração escolhida (mantém o modal aberto trocando o passo).
+    if (integration === "hubspot") {
+      createHubspotIngest(id);
+      toast("Evento criado · configure o recebimento via LP");
+      setHandoff({ id, name: parsed.data.name, integration: "hubspot" });
+      return;
+    }
+    if (integration === "sympla") {
+      if (!db.settings.sympla_token) {
+        toast("Evento criado · conecte o Sympla em Integrações para importar");
+        onClose();
+        return;
+      }
+      toast("Evento criado · escolha o evento do Sympla para vincular");
+      setHandoff({ id, name: parsed.data.name, integration: "sympla" });
+      return;
+    }
+
+    toast(tpl ? `Evento criado · ${n} ${n === 1 ? "tarefa" : "tarefas"} no checklist` : "Evento criado");
     onClose();
   };
+
+  // Passo seguinte: o evento já existe; entrega o fluxo da integração escolhida.
+  if (handoff?.integration === "hubspot") {
+    return <HubspotWebhookModal eventId={handoff.id} eventName={handoff.name} onClose={onClose} />;
+  }
+  if (handoff?.integration === "sympla") {
+    return <SymplaEventsModal onClose={onClose} />;
+  }
 
   return (
     <Modal
@@ -238,6 +281,31 @@ export function EventFormModal({ event, onClose }: { event?: Event; onClose: () 
             {templateId && (
               <p className="cover-hint">
                 As tarefas entram com prazos calculados a partir da data do evento.
+              </p>
+            )}
+          </Field>
+        )}
+        {!event && (
+          <Field label="Integração inicial" style={{ marginBottom: 0 }}>
+            <select
+              className="input"
+              value={integration}
+              onChange={(e) => setIntegration(e.target.value)}
+            >
+              <option value="">Nenhuma</option>
+              <option value="hubspot">HubSpot · receber via LP (sem API)</option>
+              <option value="sympla">Sympla · importar inscritos</option>
+            </select>
+            {integration === "hubspot" && (
+              <p className="cover-hint">
+                Ao criar, geramos o endpoint e mostramos o snippet pra colar na sua landing page.
+              </p>
+            )}
+            {integration === "sympla" && (
+              <p className="cover-hint">
+                {db.settings.sympla_token
+                  ? "Ao criar, abrimos a importação do Sympla pra vincular este evento."
+                  : "Conecte o Sympla em Integrações para usar esta opção."}
               </p>
             )}
           </Field>
