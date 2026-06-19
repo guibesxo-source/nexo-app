@@ -5,9 +5,10 @@
    entrega o snippet pronto pra colar na LP. A cada envio do formulário, a LP faz
    POST em /api/ingest/hubspot e o inscrito entra no evento (ver route handler).
    Caminho pensado pra quando o formulário vive num portal sem acesso à API. */
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Field, Icon, Modal, useToast } from "@/components/app/kit";
 import { createHubspotIngest, removeHubspotIngest, useDb } from "@/lib/db";
+import { HubspotCsvImportModal } from "@/components/app/hubspot-csv-import";
 import { fmtDate } from "@/lib/format";
 
 /** Snippet standalone pra LP: escuta o postMessage do embed do HubSpot e, no
@@ -56,6 +57,7 @@ export function HubspotWebhookModal({ eventId, eventName, onClose }: {
 }) {
   const db = useDb();
   const toast = useToast();
+  const [csvOpen, setCsvOpen] = useState(false);
   const endpoint = db.ingestEndpoints.find(
     (e) => e.event_id === eventId && e.provider === "hubspot"
   );
@@ -75,6 +77,13 @@ export function HubspotWebhookModal({ eventId, eventName, onClose }: {
       toast("Não consegui copiar — selecione e copie manualmente");
     }
   };
+
+  // Passo de backlog: importar quem já se inscreveu (CSV exportado do HubSpot).
+  if (csvOpen) {
+    return (
+      <HubspotCsvImportModal eventId={eventId} eventName={eventName} onClose={() => setCsvOpen(false)} />
+    );
+  }
 
   return (
     <Modal
@@ -123,7 +132,27 @@ export function HubspotWebhookModal({ eventId, eventName, onClose }: {
             </div>
           </Field>
 
-          <Field label="Snippet para a landing page">
+          <div
+            style={{
+              background: "var(--surface-2, rgba(127,127,127,0.08))",
+              border: "1px solid rgba(127,127,127,0.22)",
+              borderRadius: 12,
+              padding: "12px 14px",
+              marginBottom: 14,
+            }}
+          >
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Como instalar na sua LP</div>
+            <ol style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, color: "var(--dim)", lineHeight: 1.7 }}>
+              <li>Abra o <b>HTML da landing page</b> — a mesma página onde está o formulário do HubSpot.</li>
+              <li>Cole o snippet abaixo logo <b>antes do <code>&lt;/body&gt;</code></b> (ou no campo de HTML/footer da página).</li>
+              <li><b>Publique</b> a LP e faça um envio de teste — o inscrito deve cair neste evento.</li>
+            </ol>
+            <p style={{ fontSize: 12, color: "var(--dim)", margin: "8px 0 0" }}>
+              Não precisa mexer no código do formulário do HubSpot — o snippet escuta o envio sozinho.
+            </p>
+          </div>
+
+          <Field label="Snippet para colar no HTML da LP">
             <textarea
               className="input"
               readOnly
@@ -167,6 +196,17 @@ export function HubspotWebhookModal({ eventId, eventName, onClose }: {
           </button>
         </>
       )}
+
+      <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid rgba(127,127,127,0.22)" }}>
+        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>Já tem inscritos no HubSpot?</div>
+        <p style={{ fontSize: 12.5, color: "var(--dim)", margin: "0 0 10px" }}>
+          O webhook só pega novos envios, daqui pra frente. Para trazer quem <b>já se inscreveu</b>,
+          exporte o CSV no HubSpot e importe aqui — mesmo mapeamento, dedup por email.
+        </p>
+        <button className="btn" onClick={() => setCsvOpen(true)}>
+          <Icon name="upload" size={15} /> Importar inscritos atuais (CSV)
+        </button>
+      </div>
     </Modal>
   );
 }
