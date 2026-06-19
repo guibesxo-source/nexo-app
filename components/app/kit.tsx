@@ -276,35 +276,53 @@ export function Kpi({ icon, iconTone, value, label, delta, deltaDir, side, foot,
   );
 }
 
-/* ---------- Bar chart ---------- */
+/* ---------- Bar chart ----------
+   Plotagem e eixo são camadas separadas: cada coluna é flex:1 com min-width:0,
+   então TODAS as barras têm a mesma largura. Os rótulos do eixo (que variam de
+   tamanho) ficam numa faixa própria, centrados sobre a barra sem empurrá-la.
+   Extras: linha de média, destaque do pico e tooltip por barra. */
 export function BarChart({ data, lastAlt }: { data: { l: string; v: number }[]; lastAlt?: boolean }) {
   const max = Math.max(...data.map((d) => d.v), 1);
-  // Com muitas barras (ex.: histórico dia a dia), rareia os rótulos para não
-  // empilhar texto e aproxima as colunas.
+  const total = data.reduce((sum, d) => sum + d.v, 0);
+  const avg = data.length ? total / data.length : 0;
+  const peakIdx = data.reduce((best, d, i) => (d.v > data[best].v ? i : best), 0);
   const dense = data.length > 16;
   const step = dense ? Math.ceil(data.length / 12) : 1;
+  // ~8% de folga no topo p/ o tooltip; barras e linha de média usam o mesmo fator.
+  const scale = 0.92;
+  const avgPct = max > 0 ? (avg / max) * 100 * scale : 0;
+
   return (
-    <div className={"bars" + (dense ? " dense" : "")}>
-      {data.map((d, i) => {
-        const showLabel = i % step === 0 || i === data.length - 1;
-        return (
-          <div className="col" key={i}>
-            <div className="b-track">
-              <div
-                className={
-                  "b" +
-                  (lastAlt && i === data.length - 1 ? " alt" : "") +
-                  (d.v === 0 ? " zero" : "")
-                }
-                style={{ height: d.v === 0 ? 0 : (d.v / max) * 100 + "%" }}
-              >
-                <span className="bval">{d.v}</span>
-              </div>
-            </div>
-            <div className="cl">{showLabel ? d.l : " "}</div>
+    <div className={"chart" + (dense ? " dense" : "")}>
+      <div className="chart-plot">
+        {avg > 0 && data.length > 1 && (
+          <div className="chart-avg" style={{ bottom: avgPct + "%" }}>
+            <span className="chart-avg-tag">méd {avg >= 10 ? Math.round(avg) : Math.round(avg * 10) / 10}</span>
           </div>
-        );
-      })}
+        )}
+        {data.map((d, i) => (
+          <div className="chart-col" key={i}>
+            <div
+              className={
+                "chart-bar" +
+                (d.v > 0 && i === peakIdx ? " peak" : "") +
+                (lastAlt && i === data.length - 1 ? " alt" : "") +
+                (d.v === 0 ? " zero" : "")
+              }
+              style={{ height: d.v === 0 ? 0 : (d.v / max) * 100 * scale + "%" }}
+            >
+              <span className="chart-tip">{d.l} · <b>{d.v}</b></span>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="chart-axis">
+        {data.map((d, i) => (
+          <div className="chart-axis-cell" key={i}>
+            {(i % step === 0 || i === data.length - 1) && <span>{d.l}</span>}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

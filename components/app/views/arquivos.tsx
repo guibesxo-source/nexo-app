@@ -23,6 +23,7 @@ import { fmtDateShort } from "@/lib/format";
 import type { EventFile, EventFileCategory } from "@/types";
 
 const MAX_UPLOAD = 2 * 1024 * 1024; // ~2 MB — uploads grandes devem ir como link
+const MAX_UPLOAD_LABEL = `${Math.round(MAX_UPLOAD / (1024 * 1024))} MB`;
 
 function linkHost(url: string): string {
   try {
@@ -64,7 +65,7 @@ function FileFormModal({ eventId, edit, initialCategory, onClose }: {
         return;
       }
       if (f.size > MAX_UPLOAD) {
-        toast("Arquivo grande demais — use um link da nuvem");
+        toast(`Arquivo grande demais (máx. ${MAX_UPLOAD_LABEL}) — use um link da nuvem`);
         return;
       }
       const data = await fileToDataUrl(f);
@@ -146,7 +147,7 @@ function FileFormModal({ eventId, edit, initialCategory, onClose }: {
         />
       </Field>
 
-      <Field label="Ou envie um arquivo (pequeno)">
+      <Field label={`Ou envie um arquivo (até ${MAX_UPLOAD_LABEL})`}>
         <input
           ref={fileRef}
           type="file"

@@ -94,6 +94,14 @@ const dateOnly = (date: Date) =>
     String(date.getDate()).padStart(2, "0"),
   ].join("-");
 
+/** Dias (inclusivo) entre duas datas YYYY-MM-DD; base da média/dia honesta. */
+const daysInclusive = (from: string, to: string) => {
+  const a = new Date(from + "T00:00:00").getTime();
+  const b = new Date(to + "T00:00:00").getTime();
+  if (Number.isNaN(a) || Number.isNaN(b)) return 0;
+  return Math.round((b - a) / 86400000) + 1;
+};
+
 function dashboardColumns(width: number): number {
   if (width < 620) return 1;
   if (width < 900) return 2;
@@ -526,6 +534,24 @@ export function Dashboard({ eventId }: { eventId?: string }) {
     : signupsByDate(db, ev.id, { from: signupFrom || undefined, to: signupTo || undefined, days: 14 });
   const signupToday = signupsByDate(db, ev.id, { from: today, to: today }).reduce((sum, item) => sum + item.v, 0);
   const signupTotal = signups.reduce((sum, item) => sum + item.v, 0);
+  // Insights do gráfico: média/dia sobre o nº real de dias da janela (não por
+  // barra, p/ ser honesta com buckets semanais ou dias vazios omitidos), o pico
+  // do período e a tendência (2ª metade vs 1ª metade da janela visível).
+  const signupWindowDays =
+    signupFrom && signupTo ? daysInclusive(signupFrom, signupTo)
+    : signupFrom ? daysInclusive(signupFrom, today)
+    : 14;
+  const signupAvg = signupWindowDays > 0 ? signupTotal / signupWindowDays : 0;
+  const fmtAvg = signupAvg >= 10
+    ? String(Math.round(signupAvg))
+    : String(Math.round(signupAvg * 10) / 10).replace(".", ",");
+  const signupPeak = signups.reduce((best, d) => (d.v > best.v ? d : best), { l: "", v: 0 });
+  const signupHalf = Math.floor(signups.length / 2);
+  const signupFirstHalf = signups.slice(0, signupHalf).reduce((s, d) => s + d.v, 0);
+  const signupLastHalf = signups.slice(signups.length - signupHalf).reduce((s, d) => s + d.v, 0);
+  const signupTrend = signupHalf > 0 && signupFirstHalf > 0
+    ? Math.round(((signupLastHalf - signupFirstHalf) / signupFirstHalf) * 100)
+    : null;
   // Atalhos de período: definem De/Até como uma janela que termina hoje.
   const applySignupPreset = (rangeDays: number) => {
     const from = new Date(today + "T00:00:00");
@@ -687,8 +713,21 @@ export function Dashboard({ eventId }: { eventId?: string }) {
           >
             <div className="dash-chart-meta">
               <div className="dash-chart-total">
-                <b>{signupToday}</b> hoje · <b>{signupTotal}</b> no periodo
+                <b>{signupToday}</b> hoje · <b>{signupTotal}</b> no período
               </div>
+              <div className="dash-chart-total">Média <b>{fmtAvg}</b>/dia</div>
+              {signupPeak.v > 0 && (
+                <div className="dash-chart-total">Pico <b>{signupPeak.v}</b> · {signupPeak.l}</div>
+              )}
+              {signupTrend !== null && signupTrend !== 0 && (
+                <div
+                  className={"dash-chart-trend " + (signupTrend > 0 ? "up" : "down")}
+                  title="Tendência: 2ª metade do período comparada com a 1ª metade"
+                >
+                  <Icon name={signupTrend > 0 ? "arrowUp" : "arrowDown"} size={12} />
+                  {Math.abs(signupTrend)}% <span className="dash-chart-trend-sub">no período</span>
+                </div>
+              )}
               {k.goal > 0 && (
                 <div
                   className={

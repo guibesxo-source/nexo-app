@@ -252,7 +252,6 @@ const sourceLabel = (s?: string | null) => (s ? SOURCE_LABEL[s] ?? s : "Manual")
 function buildFacets(all: Attendee[]): FacetDef[] {
   const base: Omit<FacetDef, "toggleKey">[] = [
     { key: "ticket", label: "Ingresso", defaultOn: true, value: (a) => a.ticket },
-    { key: "company", label: "Empresa", defaultOn: false, value: (a) => a.company || "—" },
     { key: "source", label: "Origem", defaultOn: false, value: (a) => sourceLabel(a.external_source) },
     ...leadColumnsOf(all).map((col) => ({
       key: `lead:${col.key}`,
@@ -308,6 +307,75 @@ function FilterPicker({ options, onToggle, activeCount = 0 }: {
   );
 }
 
+/** Filtro de uma faceta com seleção múltipla: dropdown com checkboxes,
+   resumo legível no botão ("Todos", o valor único, ou "N selecionados"). */
+function FacetMultiSelect({ label, options, selected, onChange }: {
+  label: string;
+  options: string[];
+  selected: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const active = selected.length > 0;
+  const summary = !active
+    ? `Todos (${options.length})`
+    : selected.length === 1
+      ? selected[0]
+      : `${selected.length} selecionados`;
+  const toggle = (opt: string) =>
+    onChange(selected.includes(opt) ? selected.filter((s) => s !== opt) : [...selected, opt]);
+
+  return (
+    <div className={"facet-field" + (active ? " active" : "")}>
+      <span className="facet-field-label">{label}</span>
+      <span className="menu-wrap facet-ms">
+        <button
+          type="button"
+          className={"facet-ms-btn" + (open ? " open" : "")}
+          onClick={() => setOpen((o) => !o)}
+          aria-haspopup="menu"
+          title={summary}
+        >
+          <span className="facet-ms-val">{summary}</span>
+          {active && <span className="facet-ms-badge">{selected.length}</span>}
+          <Icon name="chevDown" size={14} />
+        </button>
+        {open && (
+          <>
+            <span className="menu-scrim" onClick={() => setOpen(false)} />
+            <span className="menu left facet-ms-menu" role="menu">
+              <button
+                type="button"
+                className={"facet-ms-opt all" + (!active ? " on" : "")}
+                onClick={() => onChange([])}
+              >
+                <span className="facet-ms-box"><Icon name="check" size={12} /></span>
+                <span className="facet-ms-opt-label">Todos</span>
+                <span className="facet-ms-opt-ct">{options.length}</span>
+              </button>
+              {options.map((opt) => {
+                const on = selected.includes(opt);
+                return (
+                  <button
+                    type="button"
+                    key={opt}
+                    className={"facet-ms-opt" + (on ? " on" : "")}
+                    onClick={() => toggle(opt)}
+                    title={opt}
+                  >
+                    <span className="facet-ms-box"><Icon name="check" size={12} /></span>
+                    <span className="facet-ms-opt-label">{opt}</span>
+                  </button>
+                );
+              })}
+            </span>
+          </>
+        )}
+      </span>
+    </div>
+  );
+}
+
 /* Cores distintas por tipo de ingresso (estáveis por evento, sem colisão):
    "Geral" fica cinza; os demais tipos entram num rodízio de cores fortes na
    ordem alfabética — assim Participante e Field Sales nunca ficam iguais. */
@@ -336,8 +404,8 @@ export function Inscritos() {
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
   const [leadOpen, setLeadOpen] = useState<Attendee | null>(null);
-  // Valor selecionado por faceta ("" = todas); transitório (não persiste).
-  const [facetVal, setFacetVal] = useState<Record<string, string>>({});
+  // Valores selecionados por faceta (vazio = todas); transitório (não persiste).
+  const [facetVal, setFacetVal] = useState<Record<string, string[]>>({});
 
   useEffect(() => {
     const onSearch = (e: Event) => {
@@ -359,18 +427,21 @@ export function Inscritos() {
 
   const facets = buildFacets(all);
   const visibleFacets = facets.filter((f) => db.settings.toggles[f.toggleKey] ?? f.defaultOn);
-  const activeFacetCount = visibleFacets.filter((f) => facetVal[f.key]).length;
+  const activeFacetCount = visibleFacets.filter((f) => (facetVal[f.key]?.length ?? 0) > 0).length;
   const facetOptions = (f: FacetDef) =>
     [...new Set(all.map(f.value).filter(Boolean))].sort((x, y) => x.localeCompare(y, "pt-BR"));
   const toggleFacet = (key: string, on: boolean) => {
     setToggle(`insc.facet.${key}`, on);
-    if (!on) setFacetVal((v) => ({ ...v, [key]: "" }));
+    if (!on) setFacetVal((v) => ({ ...v, [key]: [] }));
   };
 
   const rows = all
     .filter((a) => tab === "todos" || a.status === tab)
     .filter((a) => !q || (a.name + a.email + a.company + leadSearchText(a)).toLowerCase().includes(q.toLowerCase()))
-    .filter((a) => visibleFacets.every((f) => !facetVal[f.key] || f.value(a) === facetVal[f.key]))
+    .filter((a) => visibleFacets.every((f) => {
+      const sel = facetVal[f.key];
+      return !sel || sel.length === 0 || sel.includes(f.value(a));
+    }))
     .sort((a, b) => attendeeSignupAt(b).localeCompare(attendeeSignupAt(a)));
 
   const exportCsv = () => {
@@ -433,7 +504,7 @@ export function Inscritos() {
           <>
             {symplaSync.link && (
               <button
-                className="btn"
+                className={"btn btn-sync" + (symplaSync.busy ? " busy" : "")}
                 onClick={async () => {
                   const result = await symplaSync.syncNow();
                   if (result) {
@@ -442,7 +513,8 @@ export function Inscritos() {
                 }}
                 disabled={symplaSync.busy}
               >
-                <Icon name="refresh" size={15} />{symplaSync.busy ? "Sincronizando" : "Sync Sympla"}
+                <Icon name="refresh" size={15} />
+                <span className="btn-sync-label">{symplaSync.busy ? "Sincronizando" : "Sync Sympla"}</span>
               </button>
             )}
             <button className="btn" onClick={() => setImporting(true)}>
@@ -491,25 +563,15 @@ export function Inscritos() {
 
       {visibleFacets.length > 0 && (
         <div className="facet-bar">
-          {visibleFacets.map((f) => {
-            const val = facetVal[f.key] ?? "";
-            const opts = facetOptions(f);
-            return (
-              <div className={"facet-field" + (val ? " active" : "")} key={f.key}>
-                <span className="facet-field-label">{f.label}</span>
-                <select
-                  className="input facet-field-select"
-                  value={val}
-                  onChange={(e) => setFacetVal((v) => ({ ...v, [f.key]: e.target.value }))}
-                >
-                  <option value="">Todos ({opts.length})</option>
-                  {opts.map((opt) => (
-                    <option key={opt} value={opt}>{opt}</option>
-                  ))}
-                </select>
-              </div>
-            );
-          })}
+          {visibleFacets.map((f) => (
+            <FacetMultiSelect
+              key={f.key}
+              label={f.label}
+              options={facetOptions(f)}
+              selected={facetVal[f.key] ?? []}
+              onChange={(next) => setFacetVal((v) => ({ ...v, [f.key]: next }))}
+            />
+          ))}
           {activeFacetCount > 0 && (
             <button className="facet-clear-all" onClick={() => setFacetVal({})}>
               <Icon name="x" size={13} />
@@ -524,18 +586,17 @@ export function Inscritos() {
           <thead>
             <tr>
               <th>Participante</th>
-              <th>Empresa</th>
               <th>Ingresso</th>
               <th>Lead</th>
               <th>Status</th>
-              <th>Inscricao</th>
+              <th>Inscrição</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={7} style={{ textAlign: "center", padding: 40, color: "var(--dim)" }}>
+                <td colSpan={6} style={{ textAlign: "center", padding: 40, color: "var(--dim)" }}>
                   {all.length === 0
                     ? "Nenhum inscrito ainda - adicione o primeiro."
                     : "Nenhum inscrito encontrado com esses filtros."}
@@ -561,7 +622,6 @@ export function Inscritos() {
                         </div>
                       </div>
                     </td>
-                    <td>{a.company || "—"}</td>
                     <td className="ticket-cell">
                       <Badge tone={ticketTones.get(a.ticket) ?? "gray"}>{a.ticket}</Badge>
                     </td>

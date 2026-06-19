@@ -646,17 +646,15 @@ export function Financeiro() {
               <span className="bc-bv">{fmtMoney(k.income)}</span>
             </div>
           </div>
-          <div className={"bc-note " + finNote.tone}>
-            <Icon name="bolt" size={14} />
-            <span>{finNote.text}</span>
+          <div className="bc-foot">
+            <div className={"bc-note " + finNote.tone}>
+              <Icon name="bolt" size={14} />
+              <span>{finNote.text}</span>
+            </div>
+            <button className="btn btn-sm bc-edit" onClick={() => setEditingBudget(true)}>
+              Editar orçamento
+            </button>
           </div>
-          <button
-            className="btn btn-sm"
-            style={{ marginTop: 16, position: "relative", zIndex: 1 }}
-            onClick={() => setEditingBudget(true)}
-          >
-            Editar orçamento
-          </button>
         </div>
         <Card
           title="Por categoria"
