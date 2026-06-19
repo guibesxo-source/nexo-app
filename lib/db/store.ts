@@ -116,6 +116,16 @@ export async function sbInsertOrdered(steps: Array<[table: string, rows: Row[]]>
   }
 }
 
+/** Delete por uma coluna arbitrária (ex.: tabelas com PK que não é `id`). */
+export function sbDeleteBy(table: string, column: string, value: string) {
+  if (!workspaceId) return;
+  void client()
+    .from(table)
+    .delete()
+    .eq(column, value)
+    .then(({ error }) => logErr(`delete ${table}`, error));
+}
+
 export function sbUpsert(table: string, rows: Row | Row[], onConflict?: string) {
   if (!workspaceId) return;
   void client()
@@ -185,7 +195,7 @@ export async function hydrate() {
     if (!mem) return;
     workspaceId = String((mem as Row).workspace_id);
 
-    const [wsR, membersR, eventsR, attendeesR, tasksR, attachR, catsR, txR, actR, tplR, setR] =
+    const [wsR, membersR, eventsR, attendeesR, tasksR, attachR, catsR, txR, actR, tplR, setR, ingestR] =
       await Promise.all([
         supabase.from("workspaces").select("*").eq("id", workspaceId).maybeSingle(),
         supabase.from("members").select("*").order("created_at"),
@@ -198,6 +208,9 @@ export async function hydrate() {
         supabase.from("activity").select("*").order("created_at", { ascending: false }).limit(50),
         supabase.from("checklist_templates").select("*"),
         supabase.from("app_settings").select("data").eq("workspace_id", workspaceId).maybeSingle(),
+        // Tolerante: se a tabela ainda não existir (migration 0002 não aplicada),
+        // supabase-js devolve { data:null, error } sem lançar — vira [].
+        supabase.from("ingest_endpoints").select("*").order("created_at", { ascending: false }),
       ]);
 
     const attByTask = new Map<string, TaskAttachment[]>();
@@ -241,6 +254,7 @@ export async function hydrate() {
       transactions: ((txR.data ?? []) as Row[]).map(map.rowToTransaction),
       templates: ((tplR.data ?? []) as Row[]).map(map.rowToTemplate),
       activity: ((actR.data ?? []) as Row[]).map(map.rowToActivity),
+      ingestEndpoints: ((ingestR.data ?? []) as Row[]).map(map.rowToIngestEndpoint),
       settings,
     };
   } catch (e) {

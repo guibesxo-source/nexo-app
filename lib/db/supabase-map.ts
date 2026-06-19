@@ -10,6 +10,7 @@ import type {
   ChecklistTemplate,
   ChecklistTemplateItem,
   Event,
+  IngestEndpoint,
   Member,
   Task,
   TaskAttachment,
@@ -200,6 +201,35 @@ export function attachmentToRow(
     kind: a.kind,
     data: a.data,
     added_at: a.added_at,
+  };
+}
+
+/* ---------- Endpoints de ingestão (webhook) ---------- */
+
+export function rowToIngestEndpoint(r: Row): IngestEndpoint {
+  return {
+    token: str(r.token),
+    event_id: str(r.event_id),
+    provider: str(r.provider) || "hubspot",
+    label: (r.label as string | null) ?? null,
+    allowed_origin: (r.allowed_origin as string | null) ?? null,
+    created_at: str(r.created_at),
+    last_received_at: strOrNull(r.last_received_at),
+    received_count: num(r.received_count),
+  };
+}
+
+/** Linha de insert — stats (received_count/last_received_at) ficam por conta do
+   route handler (service role), então não vão aqui. */
+export function ingestEndpointToRow(workspaceId: string, e: IngestEndpoint): Row {
+  return {
+    token: e.token,
+    workspace_id: workspaceId,
+    event_id: e.event_id,
+    provider: e.provider,
+    label: e.label ?? null,
+    allowed_origin: e.allowed_origin ?? null,
+    created_at: e.created_at,
   };
 }
 

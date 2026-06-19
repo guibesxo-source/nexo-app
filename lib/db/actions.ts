@@ -16,6 +16,7 @@ import type {
   EventFile,
   EventFormat,
   EventPriority,
+  IngestEndpoint,
   Member,
   SymplaEventLink,
   Task,
@@ -36,6 +37,7 @@ import {
   saveSelectedEvent,
   saveSettings,
   sbDelete,
+  sbDeleteBy,
   sbInsert,
   sbInsertOrdered,
   sbUpdate,
@@ -44,6 +46,7 @@ import {
   activityToRow,
   attendeeToRow,
   eventToRow,
+  ingestEndpointToRow,
   memberToRow,
   taskToRow,
   transactionToRow,
@@ -960,6 +963,49 @@ export function setSymplaEventLink(
 export function setHubspotToken(token: string | null) {
   mutate((s) => ({ ...s, settings: { ...s.settings, hubspot_token: token } }));
   saveSettings();
+}
+
+/* ---------- Endpoints de ingestão (webhook de formulário, sem API) ---------- */
+
+/** Token longo e url-safe — é o segredo público do endpoint de recebimento. */
+function ingestToken(): string {
+  if (typeof crypto !== "undefined" && "getRandomValues" in crypto) {
+    const b = new Uint8Array(24);
+    crypto.getRandomValues(b);
+    return Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+  }
+  return (newId() + newId()).replace(/-/g, "");
+}
+
+/**
+ * Cria um endpoint de webhook para o evento receber inscritos de um formulário
+ * externo (ex.: HubSpot numa LP) sem usar a API. Devolve o endpoint (com o
+ * token) para a UI montar a URL + snippet.
+ */
+export function createHubspotIngest(eventId: string, label?: string): IngestEndpoint {
+  const endpoint: IngestEndpoint = {
+    token: ingestToken(),
+    event_id: eventId,
+    provider: "hubspot",
+    label: label ?? null,
+    allowed_origin: null,
+    created_at: now(),
+    last_received_at: null,
+    received_count: 0,
+  };
+  mutate((s) => ({ ...s, ingestEndpoints: [endpoint, ...s.ingestEndpoints] }));
+  const w = ws();
+  if (w) sbInsert("ingest_endpoints", ingestEndpointToRow(w, endpoint));
+  return endpoint;
+}
+
+/** Revoga um endpoint (apaga a linha) — a URL/token param de funcionar. */
+export function removeHubspotIngest(token: string) {
+  mutate((s) => ({
+    ...s,
+    ingestEndpoints: s.ingestEndpoints.filter((e) => e.token !== token),
+  }));
+  if (ws()) sbDeleteBy("ingest_endpoints", "token", token);
 }
 
 export function setClickupToken(token: string | null) {

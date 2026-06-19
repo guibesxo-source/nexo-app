@@ -23,6 +23,7 @@ import {
 import { SymplaEventsModal } from "@/components/app/sympla-events";
 import { ClickupImportModal } from "@/components/app/clickup-import";
 import { HubspotImportModal } from "@/components/app/hubspot-import";
+import { HubspotWebhookModal } from "@/components/app/hubspot-webhook";
 
 /** Chama um proxy de integração (/api/hubspot|sympla|clickup) e devolve os itens. */
 async function callProxy(path: string, body: Record<string, string>): Promise<unknown[]> {
@@ -60,30 +61,39 @@ function IntegrationCard({ p, onManage }: {
       <div className="integ-foot">
         {soon ? (
           <button className="btn" disabled>Em breve</button>
-        ) : connected ? (
-          p.onImport ? (
-            <>
-              <button className="btn btn-dark" onClick={p.onImport}>
-                <Icon name="download" size={15} />{p.importLabel ?? "Importar"}
-              </button>
-              <button
-                className="btn btn-ghost integ-manage"
-                onClick={() => onManage(p)}
-                title="Gerenciar conexão"
-                aria-label="Gerenciar conexão"
-              >
-                <Icon name="settings" size={16} />
-              </button>
-            </>
-          ) : (
-            <button className="btn" onClick={() => onManage(p)}>
-              <Icon name="link" size={15} />Gerenciar
-            </button>
-          )
         ) : (
-          <button className="btn btn-dark" onClick={() => onManage(p)}>
-            <Icon name="link" size={15} />Conectar
-          </button>
+          <>
+            {connected ? (
+              p.onImport ? (
+                <>
+                  <button className="btn btn-dark" onClick={p.onImport}>
+                    <Icon name="download" size={15} />{p.importLabel ?? "Importar"}
+                  </button>
+                  <button
+                    className="btn btn-ghost integ-manage"
+                    onClick={() => onManage(p)}
+                    title="Gerenciar conexão"
+                    aria-label="Gerenciar conexão"
+                  >
+                    <Icon name="settings" size={16} />
+                  </button>
+                </>
+              ) : (
+                <button className="btn" onClick={() => onManage(p)}>
+                  <Icon name="link" size={15} />Gerenciar
+                </button>
+              )
+            ) : (
+              <button className="btn btn-dark" onClick={() => onManage(p)}>
+                <Icon name="link" size={15} />Conectar
+              </button>
+            )}
+            {p.onSecondary && (
+              <button className="btn btn-ghost" onClick={p.onSecondary}>
+                <Icon name={p.secondaryIcon ?? "bolt"} size={15} />{p.secondaryLabel ?? "Mais"}
+              </button>
+            )}
+          </>
         )}
       </div>
     </div>
@@ -98,9 +108,11 @@ export function Integracoes() {
   const [symplaEventsOpen, setSymplaEventsOpen] = useState(false);
   const [clickupOpen, setClickupOpen] = useState(false);
   const [hubspotOpen, setHubspotOpen] = useState(false);
+  const [hubspotWebhookOpen, setHubspotWebhookOpen] = useState(false);
 
   const openClickup = ev ? () => setClickupOpen(true) : undefined;
   const openHubspot = ev ? () => setHubspotOpen(true) : undefined;
+  const openHubspotWebhook = ev ? () => setHubspotWebhookOpen(true) : undefined;
 
   const available: IntegrationProvider[] = [
     {
@@ -128,6 +140,9 @@ export function Integracoes() {
       save: setHubspotToken,
       onImport: openHubspot,
       importLabel: "Importar inscritos",
+      onSecondary: openHubspotWebhook,
+      secondaryLabel: "Receber via LP",
+      secondaryIcon: "bolt",
     },
     {
       id: "sympla",
@@ -254,6 +269,9 @@ export function Integracoes() {
       )}
       {hubspotOpen && ev && (
         <HubspotImportModal eventId={ev.id} eventName={ev.name} onClose={() => setHubspotOpen(false)} />
+      )}
+      {hubspotWebhookOpen && ev && (
+        <HubspotWebhookModal eventId={ev.id} eventName={ev.name} onClose={() => setHubspotWebhookOpen(false)} />
       )}
     </div>
   );

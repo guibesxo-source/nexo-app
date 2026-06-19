@@ -234,6 +234,24 @@ export type SymplaEventLink = {
   field_keys?: string[];
 };
 
+/**
+ * Endpoint de ingestão (webhook) por evento — recebe inscritos de um formulário
+ * externo (ex.: HubSpot embedado numa LP) via POST público, SEM a API do
+ * provedor. O `token` é o segredo da URL. Persistido na tabela `ingest_endpoints`
+ * (não no blob de settings); as stats são escritas pelo route handler.
+ */
+export type IngestEndpoint = {
+  token: string;
+  event_id: string;
+  provider: "hubspot" | (string & {});
+  label?: string | null;
+  /** Se preenchido, o webhook só aceita POST dessa origem. */
+  allowed_origin?: string | null;
+  created_at: string;
+  last_received_at?: string | null;
+  received_count: number;
+};
+
 export type EventFileCategory =
   | "midia-kit"
   | "criativos"

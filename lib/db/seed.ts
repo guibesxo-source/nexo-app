@@ -11,6 +11,7 @@ import type {
   BudgetCategory,
   ChecklistTemplate,
   Event,
+  IngestEndpoint,
   Member,
   Session,
   Task,
@@ -35,6 +36,8 @@ export type DbState = {
   /** Templates de checklist customizados do usuário (built-ins vivem em actions.ts). */
   templates: ChecklistTemplate[];
   activity: Activity[];
+  /** Endpoints de webhook por evento (recebem inscritos de formulários externos). */
+  ingestEndpoints: IngestEndpoint[];
   settings: AppSettings;
 };
 
@@ -195,6 +198,7 @@ export function seedState(): DbState {
     transactions,
     templates: [],
     activity,
+    ingestEndpoints: [],
     settings: {
       toggles: { email: true, push: true, weekly: false, slack: true, public: false, twofa: true },
     },

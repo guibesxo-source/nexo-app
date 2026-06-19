@@ -32,6 +32,11 @@ export type IntegrationProvider = {
   /** Ação de importação quando já conectado (botão primário do card). */
   onImport?: () => void;
   importLabel?: string;
+  /** Ação extra do card, disponível independente de estar conectado (ex.: HubSpot
+      "Receber via LP" — webhook sem API). Só aparece se definida. */
+  onSecondary?: () => void;
+  secondaryLabel?: string;
+  secondaryIcon?: string;
 };
 
 const plural = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
