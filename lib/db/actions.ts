@@ -1362,6 +1362,12 @@ export function setLeadPanelFields(keys: string[]) {
   saveSettings();
 }
 
+/** Atributos de lead exibidos como cards de "Segmentação de leads" no dashboard. */
+export function setDashboardLeadBreakdowns(keys: string[]) {
+  mutate((s) => ({ ...s, settings: { ...s.settings, dashboard_lead_breakdowns: keys } }));
+  saveSettings();
+}
+
 export function setToggle(key: string, value: boolean) {
   mutate((s) => ({
     ...s,

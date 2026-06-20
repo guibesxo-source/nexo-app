@@ -301,6 +301,9 @@ export type AppSettings = {
   event_files?: Record<string, EventFile[]>;
   /** Campos visíveis no painel "Dados do lead" (chaves de lead_fields). Vazio/ausente = todos. */
   lead_panel_fields?: string[];
+  /** Atributos de lead exibidos como cards de "Segmentação de leads" no dashboard
+     (chaves de lead_fields). Ausente = escolha automática; [] = nenhum. */
+  dashboard_lead_breakdowns?: string[] | null;
 };
 
 export type Session = {

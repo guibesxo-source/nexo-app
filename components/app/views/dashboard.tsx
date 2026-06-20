@@ -19,14 +19,18 @@ import {
   categoryTotals,
   customMetricValue,
   dashboardConfig,
+  dynamicHighlights,
   eventById,
   eventInsights,
   eventKpis,
   firstSignupDate,
   formatMetricValue,
+  leadBreakdown,
+  leadSegmentFields,
   METRIC_CATALOG,
   metricInsight,
   removeCustomMetric,
+  setDashboardLeadBreakdowns,
   removeDashboardWidget,
   reorderDashboard,
   resetDashboard,
@@ -79,6 +83,9 @@ const FILTERS: Record<CustomMetricSource, { v: string; l: string }[]> = {
 };
 
 const defaultFilter = (s: CustomMetricSource) => (s === "checklist" ? "todas" : "todos");
+
+/** Atributos de lead priorizados como cards de segmentação por padrão. */
+const DEFAULT_BREAKDOWN_KEYS = ["hubspot:tamanho_frota", "hubspot:cargo", "hubspot:utm_source"];
 
 /** Atalhos de período do gráfico de inscritos (janela terminando hoje). */
 const SIGNUP_PRESETS: { label: string; days: number }[] = [
@@ -521,6 +528,26 @@ export function Dashboard({ eventId }: { eventId?: string }) {
 
   const k = eventKpis(db, ev.id);
   const insights = eventInsights(db, ev.id);
+
+  // Destaques dinâmicos: os KPIs mais úteis p/ a performance agora (ranqueados).
+  const highlights = dynamicHighlights(db, ev.id);
+
+  // Segmentação de leads: atributos disponíveis + os que o usuário escolheu ver.
+  const leadOptions = leadSegmentFields(db, ev.id);
+  const defaultBreakdowns = (() => {
+    const present = new Set(leadOptions.map((o) => o.key));
+    const prio = DEFAULT_BREAKDOWN_KEYS.filter((key) => present.has(key));
+    return prio.length ? prio : leadOptions.slice(0, 3).map((o) => o.key);
+  })();
+  const breakdownPref = db.settings.dashboard_lead_breakdowns;
+  const breakdownBase = breakdownPref == null ? defaultBreakdowns : breakdownPref;
+  const selectedBreakdowns = breakdownBase.filter((key) => leadOptions.some((o) => o.key === key));
+  const toggleBreakdown = (key: string) => {
+    const next = breakdownBase.includes(key)
+      ? breakdownBase.filter((x) => x !== key)
+      : [...breakdownBase, key];
+    setDashboardLeadBreakdowns(next);
+  };
   const today = dateOnly(new Date());
   const hasSignupFilter = !!signupFrom || !!signupTo;
   // "Desde o início": janela a partir do primeiro inscrito (cai no início do evento).
@@ -914,6 +941,21 @@ export function Dashboard({ eventId }: { eventId?: string }) {
         }
       />
 
+      {highlights.length > 0 && (
+        <div className="dash-highlights">
+          {highlights.map((h) => (
+            <Kpi
+              key={h.key}
+              icon={h.icon}
+              iconTone={h.tone}
+              value={h.value}
+              label={h.label}
+              foot={h.foot ? { text: h.foot.text, tone: h.foot.tone } : undefined}
+            />
+          ))}
+        </div>
+      )}
+
       {cfg.widgets.length === 0 ? (
         <Empty
           icon="grid"
@@ -979,6 +1021,59 @@ export function Dashboard({ eventId }: { eventId?: string }) {
               <div className="dash-body">{renderWidget(w)}</div>
             </div>
           ))}
+        </div>
+      )}
+
+      {leadOptions.length > 0 && (
+        <div className="leadseg">
+          <div className="integ-section" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            Segmentação de leads
+            <span style={{ fontWeight: 500, color: "var(--dim)", fontSize: 12.5 }}>
+              · clique para escolher os atributos
+            </span>
+          </div>
+          <div className="row" style={{ gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+            {leadOptions.map((o) => (
+              <button
+                key={o.key}
+                className={"chip" + (selectedBreakdowns.includes(o.key) ? " active" : "")}
+                onClick={() => toggleBreakdown(o.key)}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+          {selectedBreakdowns.length === 0 ? (
+            <Empty
+              icon="users"
+              title="Nenhum atributo selecionado"
+              sub="Clique nos atributos acima para ver a distribuição dos leads."
+            />
+          ) : (
+            <div className="leadseg-grid">
+              {selectedBreakdowns.map((key) => {
+                const opt = leadOptions.find((o) => o.key === key);
+                const rows = leadBreakdown(db, ev.id, key);
+                if (!opt || rows.length === 0) return null;
+                const top = rows[0].count;
+                return (
+                  <Card key={key} title={opt.label}>
+                    <div className="cat-list">
+                      {rows.map((r) => (
+                        <div className="cat-row" key={r.value}>
+                          <span className="cat-nm" title={r.value}>{r.value}</span>
+                          <span className="cat-bar">
+                            <i style={{ width: (top ? Math.round((r.count / top) * 100) : 0) + "%" }} />
+                          </span>
+                          <span className="cat-vl">{r.count} · {r.pct}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 

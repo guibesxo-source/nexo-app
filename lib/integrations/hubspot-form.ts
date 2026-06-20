@@ -3,11 +3,16 @@ import { attendeeSchema } from "@/lib/validations/attendee";
 import type { LeadField } from "@/types";
 
 // Converte os campos de uma submissão de formulário do HubSpot (lidos na LP e
-// enviados ao webhook, ou de um CSV exportado) num inscrito do Nexo JÁ VALIDADO
-// e LIMPO. Reconhece os campos que importam — nome, email, telefone, empresa,
-// cargo, tamanho da frota — por sinônimos PT/EN; mantém só as UTMs + página de
-// origem como extras; e DESCARTA o lixo do HubSpot (hs_context, hutk, tokens de
-// recaptcha, blobs JSON, consentimentos...). Importa só TIPOS de @/lib/db.
+// enviados ao webhook, ou de um CSV exportado) num inscrito do Nexo. Filosofia:
+// CAPTURAR TUDO que ajuda no CRM e jogar fora SÓ o ruído técnico.
+//   • Núcleo (nome, e-mail, empresa) vira coluna do inscrito.
+//   • Os campos que importam (telefone, cargo, tamanho da frota), UTMs e clicks
+//     de anúncio ganham rótulo limpo e ordem fixa.
+//   • TODO o resto do formulário é mantido como dado de lead (rótulo humanizado).
+//   • Lixo do HubSpot (hs_context, hutk, recaptcha, consentimentos, blobs JSON)
+//     é descartado.
+// A UI deixa o usuário escolher quais campos aparecem (Filtros + painel do lead).
+// Importa só TIPOS de @/lib/db (erasados em build) — roda no route handler.
 
 type Field = { name: string; value: string };
 
@@ -25,9 +30,18 @@ function canon(name: string): string {
 
 const clean = (v: string) => v.replace(/\s+/g, " ").trim();
 
+/** Rótulo legível a partir da chave: "ultima_fonte_conversao" → "Ultima Fonte Conversao". */
+function humanize(key: string): string {
+  return key
+    .split(/[._\-\s]+/)
+    .filter(Boolean)
+    .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
+    .join(" ");
+}
+
 /** Campos internos/ruído do HubSpot que NUNCA viram dado do lead. */
 const JUNK_KEY =
-  /^(hs_|__hs|hutk$|hssc$|hstc$|g_recaptcha|recaptcha|captcha|legalconsent|communication|cookie|csrf|ip_|gclid$|fbclid$)/;
+  /^(hs_|__hs|hutk$|hssc$|hstc$|g_recaptcha|recaptcha|captcha|legalconsent|communication|cookie|csrf|ip_)/;
 
 function isJunk(key: string, value: string): boolean {
   if (!key || JUNK_KEY.test(key)) return true;
@@ -63,10 +77,14 @@ const UTM_ORDER = ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-function firstOf(map: Map<string, string>, keys: readonly string[]): string {
+/** Primeiro sinônimo presente; marca a chave como consumida (não vira genérico). */
+function pick(map: Map<string, string>, keys: readonly string[], consumed: Set<string>): string {
   for (const k of keys) {
     const v = map.get(k);
-    if (v) return v;
+    if (v) {
+      consumed.add(k);
+      return v;
+    }
   }
   return "";
 }
@@ -106,24 +124,28 @@ export function hubspotFormToDraft(
     if (key && value && !isJunk(key, value) && !map.has(key)) map.set(key, value);
   }
 
-  // 2) E-mail (obrigatório) — sinônimo direto, depois qualquer campo "*email*",
-  //    por fim qualquer valor com cara de e-mail.
-  let email = firstOf(map, SYN.email);
+  const consumed = new Set<string>();
+
+  // 2) E-mail (obrigatório) — sinônimo direto, depois qualquer "*email*", por fim
+  //    qualquer valor com cara de e-mail. A chave usada é marcada como consumida.
+  let email = pick(map, SYN.email, consumed);
   if (!EMAIL_RE.test(email)) {
-    for (const [k, v] of map) if (k.includes("email") && EMAIL_RE.test(v)) { email = v; break; }
+    for (const [k, v] of map)
+      if (!consumed.has(k) && k.includes("email") && EMAIL_RE.test(v)) { email = v; consumed.add(k); break; }
   }
   if (!EMAIL_RE.test(email)) {
-    for (const v of map.values()) if (EMAIL_RE.test(v)) { email = v; break; }
+    for (const [k, v] of map)
+      if (!consumed.has(k) && EMAIL_RE.test(v)) { email = v; consumed.add(k); break; }
   }
 
   // 3) Nome — firstname+lastname, depois nome completo, por fim a partir do email.
-  const first = firstOf(map, SYN.firstname);
-  const last = firstOf(map, SYN.lastname);
+  const first = pick(map, SYN.firstname, consumed);
+  const last = pick(map, SYN.lastname, consumed);
   let name = clean([first, last].filter(Boolean).join(" "));
-  if (!name) name = firstOf(map, SYN.fullname);
+  if (!name) name = pick(map, SYN.fullname, consumed);
   if (!name && EMAIL_RE.test(email)) name = nameFromEmail(email);
 
-  const company = firstOf(map, SYN.company);
+  const company = pick(map, SYN.company, consumed);
 
   // 4) Validação: sem email/nome usável, a submissão não vira inscrito.
   const parsed = attendeeSchema.safeParse({
@@ -135,17 +157,33 @@ export function hubspotFormToDraft(
   });
   if (!parsed.success) return { ok: false, reason: "invalid" };
 
-  // 5) Dados do lead: SÓ o que importa, em ordem fixa e com rótulo limpo.
+  // 5) Dados do lead: importantes primeiro (rótulo limpo), depois TODO o resto.
   const lead_fields: LeadField[] = [];
-  const add = (key: string, label: string, value: string) => {
-    if (value) lead_fields.push({ key: `hubspot:${key}`, label, value, source: "hubspot", group: "lead" });
+  const push = (key: string, label: string, value: string, group: LeadField["group"] = "lead") => {
+    if (value) lead_fields.push({ key: `hubspot:${key}`, label, value, source: "hubspot", group });
   };
 
-  add("telefone", "Telefone", asPhone(firstOf(map, SYN.phone)));
-  add("cargo", "Cargo", firstOf(map, SYN.cargo));
-  add("tamanho_frota", "Tamanho da frota", firstOf(map, SYN.fleet));
-  for (const u of UTM_ORDER) add(u, UTM_LABELS[u], map.get(u) ?? "");
-  if (ctx.pageUrl) add("page_url", "Página de origem", clean(ctx.pageUrl));
+  // 5a) Reconhecidos (ordem fixa).
+  push("telefone", "Telefone", asPhone(pick(map, SYN.phone, consumed)));
+  push("cargo", "Cargo", pick(map, SYN.cargo, consumed));
+  push("tamanho_frota", "Tamanho da frota", pick(map, SYN.fleet, consumed));
+
+  // 5b) Origem do lead: UTMs + clicks de anúncio (atribuição p/ CRM).
+  for (const u of UTM_ORDER) {
+    const v = map.get(u);
+    if (v) { consumed.add(u); push(u, UTM_LABELS[u], v); }
+  }
+  const gclid = map.get("gclid");
+  if (gclid) { consumed.add("gclid"); push("gclid", "Google Click ID", gclid); }
+  const fbclid = map.get("fbclid");
+  if (fbclid) { consumed.add("fbclid"); push("fbclid", "Facebook Click ID", fbclid); }
+  if (ctx.pageUrl) { consumed.add("page_url"); push("page_url", "Página de origem", clean(ctx.pageUrl)); }
+
+  // 5c) Tudo o mais que o formulário trouxe (não-lixo) — captura para CRM.
+  for (const [k, v] of map) {
+    if (consumed.has(k)) continue;
+    push(k, humanize(k), v, "custom");
+  }
 
   return {
     ok: true,

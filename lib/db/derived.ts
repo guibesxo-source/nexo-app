@@ -626,6 +626,134 @@ export function customMetricValue(s: DbState, eventId: string, m: CustomMetric):
   return tasks.length;
 }
 
+/* ---------- Segmentação de leads (KPIs por atributo do lead) ---------- */
+
+export type LeadOption = { key: string; label: string };
+export type LeadBreakdownRow = { value: string; count: number; pct: number };
+
+/** Inscritos não-cancelados do evento que têm campos de lead. */
+function leadsOf(s: DbState, eventId: string): Attendee[] {
+  return attendeesOf(s, eventId).filter((a) => a.status !== "cancelado");
+}
+
+/**
+ * Atributos de lead que valem como segmentação (têm repetição e poucas
+ * categorias) — exclui campos de valor único por lead (telefone, e-mail) e os de
+ * valor sempre igual. É a lista que vira chips/cards de "Segmentação de leads".
+ */
+export function leadSegmentFields(s: DbState, eventId: string): LeadOption[] {
+  const stats = new Map<string, { label: string; values: Set<string>; total: number }>();
+  for (const a of leadsOf(s, eventId)) {
+    for (const f of a.lead_fields ?? []) {
+      if (!f.label || !f.value) continue;
+      let st = stats.get(f.key);
+      if (!st) { st = { label: f.label, values: new Set(), total: 0 }; stats.set(f.key, st); }
+      st.values.add(f.value);
+      st.total++;
+    }
+  }
+  const out: LeadOption[] = [];
+  for (const [key, st] of stats) {
+    const distinct = st.values.size;
+    // 2+ categorias, com repetição (distinct < total) e não explosivo (≤ 20).
+    if (distinct >= 2 && distinct < st.total && distinct <= 20) out.push({ key, label: st.label });
+  }
+  return out;
+}
+
+/** Distribuição dos leads pelos valores de um atributo (maior primeiro, top `limit`). */
+export function leadBreakdown(
+  s: DbState,
+  eventId: string,
+  fieldKey: string,
+  limit = 8
+): LeadBreakdownRow[] {
+  const counts = new Map<string, number>();
+  let total = 0;
+  for (const a of leadsOf(s, eventId)) {
+    const f = (a.lead_fields ?? []).find((x) => x.key === fieldKey && x.value);
+    if (!f) continue;
+    counts.set(f.value, (counts.get(f.value) ?? 0) + 1);
+    total++;
+  }
+  return [...counts]
+    .map(([value, count]) => ({ value, count, pct: total ? Math.round((count / total) * 100) : 0 }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, limit);
+}
+
+/* ---------- Destaques dinâmicos (KPIs mais úteis agora) ---------- */
+
+export type Highlight = {
+  key: string;
+  icon: string;
+  tone?: string;
+  label: string;
+  value: string;
+  foot?: { text: string; tone?: string };
+};
+
+/**
+ * Escolhe, por relevância, os KPIs mais úteis para a performance do evento AGORA:
+ * ritmo p/ meta, saúde da confirmação, melhor origem do lead, maior segmento e
+ * alertas (tarefas atrasadas, orçamento no limite). Ranqueia e devolve o top 4 —
+ * é o que alimenta a faixa de "Destaques" dinâmica do dashboard.
+ */
+export function dynamicHighlights(s: DbState, eventId: string): Highlight[] {
+  const k = eventKpis(s, eventId);
+  const ev = eventById(s, eventId);
+  const cand: { priority: number; h: Highlight }[] = [];
+
+  // Alerta: tarefas atrasadas (mais urgente).
+  if (k.tasksLate > 0) {
+    cand.push({ priority: 0, h: { key: "late", icon: "clock", tone: "red", label: "Tarefas atrasadas", value: String(k.tasksLate), foot: { text: "resolver já", tone: "red" } } });
+  }
+
+  // Ritmo para a meta de inscritos.
+  if (k.goal > 0) {
+    if (k.remainingSeats <= 0) {
+      cand.push({ priority: 3, h: { key: "pace", icon: "trending", tone: "green", label: "Meta de inscritos", value: "Atingida", foot: { text: `${k.total} de ${k.goal}`, tone: "green" } } });
+    } else if (k.neededPerDay > 0) {
+      cand.push({ priority: 1, h: { key: "pace", icon: "trending", tone: "amber", label: "Ritmo p/ meta", value: `${k.neededPerDay}/dia`, foot: { text: `faltam ${k.remainingSeats} em ${k.daysToEvent}d`, tone: "amber" } } });
+    } else {
+      cand.push({ priority: 4, h: { key: "pace", icon: "trending", tone: "blue", label: "Faltam p/ meta", value: String(k.remainingSeats), foot: { text: `de ${k.goal} vagas` } } });
+    }
+  }
+
+  // Saúde da confirmação.
+  if (k.total > 0) {
+    const tone = k.confirmRate >= 70 ? "green" : k.confirmRate >= 40 ? "amber" : "red";
+    cand.push({ priority: k.confirmRate < 40 ? 1 : 3, h: { key: "confirm", icon: "check", tone, label: "Taxa de confirmação", value: `${k.confirmRate}%`, foot: { text: `${k.pending} pendentes`, tone } } });
+  }
+
+  // Aquisição: melhor origem do lead (UTM source).
+  const src = leadBreakdown(s, eventId, "hubspot:utm_source", 1);
+  if (src.length) {
+    cand.push({ priority: 2, h: { key: "source", icon: "bolt", tone: "blue", label: "Origem nº 1", value: src[0].value, foot: { text: `${src[0].count} leads · ${src[0].pct}%` } } });
+  }
+
+  // Audiência: maior segmento (campo de lead mais informativo, fora UTM).
+  const seg = leadSegmentFields(s, eventId).find((f) => f.key !== "hubspot:utm_source");
+  if (seg) {
+    const rows = leadBreakdown(s, eventId, seg.key, 1);
+    if (rows.length) cand.push({ priority: 3, h: { key: "segment", icon: "users", label: `${seg.label} · top`, value: rows[0].value, foot: { text: `${rows[0].count} leads · ${rows[0].pct}%` } } });
+  }
+
+  // Check-in (durante/após o evento).
+  if (k.checkin > 0) {
+    const rate = k.confirmed ? Math.round((k.checkin / k.confirmed) * 100) : 0;
+    cand.push({ priority: 2, h: { key: "checkin", icon: "ticket", tone: "blue", label: "Check-ins", value: String(k.checkin), foot: { text: `${rate}% dos confirmados` } } });
+  }
+
+  // Orçamento (eleva quando perto/estourado).
+  if (ev?.budget_planned) {
+    const tone = k.budgetPct > 100 ? "red" : k.budgetPct >= 85 ? "amber" : "green";
+    cand.push({ priority: k.budgetPct >= 85 ? 1 : 5, h: { key: "budget", icon: "wallet", tone, label: "Orçamento usado", value: `${k.budgetPct}%`, foot: { text: k.budgetPct > 100 ? `estourou ${k.budgetPct - 100}%` : `${fmtMoney(k.available)} livre`, tone } } });
+  }
+
+  return cand.sort((a, b) => a.priority - b.priority).slice(0, 4).map((c) => c.h);
+}
+
 /** Layout inicial do dashboard (espelha o painel fixo anterior). */
 export const DEFAULT_DASHBOARD: DashboardConfig = {
   widgets: [

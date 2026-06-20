@@ -258,6 +258,16 @@ type FacetDef = { key: string; label: string; toggleKey: string; defaultOn: bool
 const SOURCE_LABEL: Record<string, string> = { sympla: "Sympla", hubspot: "HubSpot", csv: "CSV" };
 const sourceLabel = (s?: string | null) => (s ? SOURCE_LABEL[s] ?? s : "Manual");
 
+// Campos de lead que já entram como filtro por padrão (alto valor p/ segmentar).
+// Os demais ficam disponíveis no menu "Filtros" para o usuário ligar quando quiser.
+const DEFAULT_LEAD_FACETS = new Set([
+  "hubspot:cargo",
+  "hubspot:tamanho_frota",
+  "hubspot:utm_source",
+  "hubspot:utm_medium",
+  "hubspot:utm_campaign",
+]);
+
 function buildFacets(all: Attendee[]): FacetDef[] {
   const base: Omit<FacetDef, "toggleKey">[] = [
     { key: "ticket", label: "Ingresso", defaultOn: true, value: (a) => a.ticket },
@@ -265,7 +275,7 @@ function buildFacets(all: Attendee[]): FacetDef[] {
     ...leadColumnsOf(all).map((col) => ({
       key: `lead:${col.key}`,
       label: col.label,
-      defaultOn: false,
+      defaultOn: DEFAULT_LEAD_FACETS.has(col.key),
       value: (a: Attendee) => leadValue(a, col.key),
     })),
   ];
