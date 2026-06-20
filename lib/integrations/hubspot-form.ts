@@ -60,7 +60,7 @@ const SYN = {
   lastname: ["lastname", "last_name", "sobrenome", "ultimo_nome"],
   fullname: ["mkt_nome_completo", "nome_completo", "fullname", "full_name", "nome", "name", "seu_nome", "participante"],
   phone: ["mkt_telefone", "telefone", "telefone_celular", "phone", "celular", "whatsapp", "mobilephone", "mobile_phone", "fone", "tel"],
-  company: ["nome_da_empresa", "mkt_empresa", "empresa", "company", "company_name", "organizacao", "organization"],
+  company: ["nome_da_empresa", "nome_empresa", "empresa_nome", "mkt_empresa", "mkt_company", "sua_empresa", "empresa", "razao_social", "company", "company_name", "your_company", "organizacao", "organization"],
   cargo: ["cargo", "mkt_cargo", "jobtitle", "job_title", "funcao", "position", "role"],
   fleet: ["qual_o_tamanho_da_sua_frota", "qual_o_tamanho_da_frota", "tamanho_da_sua_frota", "tamanho_da_frota", "tamanho_frota", "mkt_frota", "frota", "fleet_size", "fleet"],
 } as const;
@@ -105,6 +105,23 @@ function asPhone(v: string): string {
   return v.replace(/\D/g, "").length >= 8 ? clean(v) : "";
 }
 
+/** Provedores de e-mail pessoais — não viram nome de empresa. */
+const FREE_EMAIL = new Set([
+  "gmail.com", "googlemail.com", "hotmail.com", "hotmail.com.br", "outlook.com", "outlook.com.br",
+  "live.com", "msn.com", "yahoo.com", "yahoo.com.br", "yahoo.es", "icloud.com", "me.com", "mac.com",
+  "aol.com", "proton.me", "protonmail.com", "gmx.com", "zoho.com",
+  "bol.com.br", "uol.com.br", "terra.com.br", "ig.com.br", "globo.com", "globomail.com", "r7.com",
+]);
+
+/** Empresa a partir do domínio do e-mail corporativo (joao@prologapp.com → "Prologapp"). */
+function companyFromEmail(email: string): string {
+  const domain = (email.split("@")[1] ?? "").toLowerCase();
+  if (!domain || FREE_EMAIL.has(domain)) return "";
+  const core = domain.split(".")[0];
+  if (!core || core.length < 2) return "";
+  return core.charAt(0).toUpperCase() + core.slice(1);
+}
+
 export type HubspotFormContext = { submittedAt?: string; pageUrl?: string };
 
 export type HubspotFormResult =
@@ -145,7 +162,9 @@ export function hubspotFormToDraft(
   if (!name) name = pick(map, SYN.fullname, consumed);
   if (!name && EMAIL_RE.test(email)) name = nameFromEmail(email);
 
-  const company = pick(map, SYN.company, consumed);
+  // Empresa: campo do formulário; se não houver, deduz do domínio corporativo.
+  let company = pick(map, SYN.company, consumed);
+  if (!company && EMAIL_RE.test(email)) company = companyFromEmail(email);
 
   // 4) Validação: sem email/nome usável, a submissão não vira inscrito.
   const parsed = attendeeSchema.safeParse({

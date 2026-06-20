@@ -10,6 +10,7 @@ import type {
   CustomMetricFormat,
   CustomMetricSource,
   DashboardConfig,
+  DashboardWidget,
   Event,
   EventFile,
   EventFileCategory,
@@ -720,10 +721,10 @@ export function dynamicHighlights(s: DbState, eventId: string): Highlight[] {
     }
   }
 
-  // Saúde da confirmação.
-  if (k.total > 0) {
-    const tone = k.confirmRate >= 70 ? "green" : k.confirmRate >= 40 ? "amber" : "red";
-    cand.push({ priority: k.confirmRate < 40 ? 1 : 3, h: { key: "confirm", icon: "check", tone, label: "Taxa de confirmação", value: `${k.confirmRate}%`, foot: { text: `${k.pending} pendentes`, tone } } });
+  // Confirmação só sobe aqui quando é ALERTA (baixa) — a saúde normal fica no KPI
+  // central, pra não duplicar.
+  if (k.total > 0 && k.confirmRate < 40) {
+    cand.push({ priority: 1, h: { key: "confirm", icon: "check", tone: "red", label: "Confirmação baixa", value: `${k.confirmRate}%`, foot: { text: `${k.pending} pendentes`, tone: "red" } } });
   }
 
   // Aquisição: melhor origem do lead (UTM source).
@@ -752,6 +753,46 @@ export function dynamicHighlights(s: DbState, eventId: string): Highlight[] {
   }
 
   return cand.sort((a, b) => a.priority - b.priority).slice(0, 4).map((c) => c.h);
+}
+
+/**
+ * Monta o dashboard DINAMICAMENTE conforme o estado do evento: Inscritos é o KPI
+ * central fixo; o resto é escolhido por relevância e os blocos pouco úteis ficam
+ * ocultos (ex.: financeiro só com orçamento/lançamentos; atividade/progresso só
+ * quando não há dados mais ricos). É o fallback quando não há layout customizado.
+ */
+export function dynamicDashboard(s: DbState, eventId: string): DashboardConfig {
+  const k = eventKpis(s, eventId);
+  const ev = eventById(s, eventId);
+  const hasFinance = (ev?.budget_planned ?? 0) > 0 || txOf(s, eventId).length > 0;
+  const hasTasks = k.tasksTotal > 0;
+  const hasInsights = eventInsights(s, eventId).length > 0;
+  const hasLeads = leadSegmentFields(s, eventId).length > 0;
+
+  const widgets: DashboardWidget[] = [
+    // KPI central: Inscritos (fixo), com confirmados/pendentes ao lado.
+    { id: "d-total", type: "kpi", metric: "total", span: 2, sideMetrics: ["confirmed", "pending"] },
+    { id: "d-confirm-kpi", type: "kpi", metric: "confirmRate", span: 1 },
+  ];
+
+  // 3º KPI por relevância: orçamento → tarefas → check-in.
+  if (hasFinance) widgets.push({ id: "d-budget", type: "kpi", metric: "budgetPct", span: 1 });
+  else if (hasTasks) widgets.push({ id: "d-tasks", type: "kpi", metric: "tasksDone", span: 1 });
+  else if (k.checkin > 0) widgets.push({ id: "d-checkin", type: "kpi", metric: "checkin", span: 1 });
+  else widgets.push({ id: "d-pending", type: "kpi", metric: "neededPerDay", span: 1 });
+
+  // Movimento: inscritos por data (coração do dashboard) + donut de confirmação.
+  widgets.push({ id: "d-signups", type: "chart-signups", span: 3 });
+  widgets.push({ id: "d-confirm", type: "chart-confirm", span: 1 });
+
+  // Blocos condicionais — só quando agregam.
+  if (hasInsights) widgets.push({ id: "d-insights", type: "list-insights", span: 2 });
+  if (hasFinance) widgets.push({ id: "d-cost", type: "block-cost", span: 2 });
+  if (hasFinance) widgets.push({ id: "d-category", type: "chart-category", span: 2 });
+  // Progresso por área só quando o evento ainda tem pouca informação (evita encher).
+  if (!hasLeads && !hasFinance) widgets.push({ id: "d-progress", type: "list-progress", span: 2 });
+
+  return { widgets, customMetrics: [] };
 }
 
 /** Layout inicial do dashboard (espelha o painel fixo anterior). */

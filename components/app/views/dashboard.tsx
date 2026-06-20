@@ -4,7 +4,7 @@
    o usuário adiciona/remove/reordena/redimensiona; KPIs do catálogo + métricas
    personalizadas + blocos (gráficos e listas). O layout vive em
    settings.dashboard (cai no DEFAULT_DASHBOARD quando vazio). */
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import {
   BarChart, Card, Donut, Empty, Field, Icon, Kpi, Modal, PageHead, useToast,
 } from "@/components/app/kit";
@@ -18,7 +18,7 @@ import {
   catalogMetric,
   categoryTotals,
   customMetricValue,
-  dashboardConfig,
+  dynamicDashboard,
   dynamicHighlights,
   eventById,
   eventInsights,
@@ -488,11 +488,13 @@ export function Dashboard({ eventId }: { eventId?: string }) {
 
   const ev = eventId ? eventById(db, eventId) : selectedEvent(db);
   const symplaSync = useSymplaAutoSync(ev?.id ?? null);
-  const cfg = dashboardConfig(db);
-  const responsiveWidgets = useMemo(
-    () => layoutWidgets(cfg.widgets, cols),
-    [cfg.widgets, cols]
-  );
+  // Sem layout customizado, o dashboard é montado dinamicamente pelo estado do
+  // evento (Inscritos central + os melhores KPIs/blocos; oculta o pouco útil).
+  const cfg =
+    db.settings.dashboard ??
+    (ev ? dynamicDashboard(db, ev.id) : { widgets: [], customMetrics: [] });
+  // Memoização fica a cargo do React Compiler (sem useMemo manual).
+  const responsiveWidgets = layoutWidgets(cfg.widgets, cols);
 
   useEffect(() => {
     const el = dashboardRef.current;
