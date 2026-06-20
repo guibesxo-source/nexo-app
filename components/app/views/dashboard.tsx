@@ -86,7 +86,14 @@ const FILTERS: Record<CustomMetricSource, { v: string; l: string }[]> = {
 const defaultFilter = (s: CustomMetricSource) => (s === "checklist" ? "todas" : "todos");
 
 /** Atributos de lead priorizados como cards de segmentação por padrão. */
-const DEFAULT_BREAKDOWN_KEYS = ["hubspot:tamanho_frota", "hubspot:cargo", "hubspot:utm_source"];
+const DEFAULT_BREAKDOWN_KEYS = [
+  "hubspot:tamanho_frota",
+  "hubspot:cargo",
+  "hubspot:utm_source",
+  "hubspot:audience",
+  "hubspot:location",
+  "hubspot:utm_content",
+];
 
 /** Atalhos de período do gráfico de inscritos (janela terminando hoje). */
 const SIGNUP_PRESETS: { label: string; days: number }[] = [

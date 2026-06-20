@@ -10,7 +10,8 @@ import { seedState, SEED_VERSION, type DbState } from "./seed";
 import { createClient } from "@/lib/supabase/client";
 import { displayNameFromUser } from "@/lib/auth";
 import { seedWorkspace } from "./seed-supabase";
-import type { AppSettings, IngestEndpoint, TaskAttachment } from "@/types";
+import type { Attendee, AppSettings, IngestEndpoint, TaskAttachment } from "@/types";
+import { attributionFromUrl } from "@/lib/integrations/hubspot-form";
 import * as map from "./supabase-map";
 
 type Sb = ReturnType<typeof createClient>;
@@ -161,6 +162,41 @@ function loadSelectedEvent(): string | null {
   }
 }
 
+/* ---------- Backfill de atribuição (página de origem → campos derivados) ---------- */
+
+/**
+ * Enriquece um inscrito com a atribuição derivada da "Página de origem" (UTMs,
+ * posicionamento, audiência, plataforma) quando ela ainda não foi extraída.
+ * Idempotente: devolve o MESMO objeto se nada muda (os novos campos entram logo
+ * antes do page_url, agrupados com o bloco de origem). Resolve os inscritos que
+ * entraram antes de o parser do webhook passar a ler a query string da URL.
+ */
+function enrichAttribution(a: Attendee): Attendee {
+  const fields = a.lead_fields ?? [];
+  const pageUrl = fields.find((f) => f.key === "hubspot:page_url")?.value;
+  if (!pageUrl) return a;
+  const have = new Set(fields.map((f) => f.key));
+  const additions = attributionFromUrl(pageUrl).filter((f) => !have.has(f.key));
+  if (!additions.length) return a;
+  const idx = fields.findIndex((f) => f.key === "hubspot:page_url");
+  const next =
+    idx >= 0
+      ? [...fields.slice(0, idx), ...additions, ...fields.slice(idx)]
+      : [...fields, ...additions];
+  return { ...a, lead_fields: next };
+}
+
+/** Aplica o backfill na lista e persiste (coluna jsonb de attendees) só os que mudaram. */
+function backfillAttribution(list: Attendee[]): Attendee[] {
+  const out = list.map(enrichAttribution);
+  for (let i = 0; i < out.length; i++) {
+    if (out[i] !== list[i]) {
+      sbUpdate("attendees", out[i].id, { lead_fields: out[i].lead_fields ?? [] });
+    }
+  }
+  return out;
+}
+
 /* ---------- Hidratação ---------- */
 
 /** Carrega o workspace do usuário logado a partir do Supabase (uma vez, no client). */
@@ -225,15 +261,17 @@ export async function hydrate() {
     const events = (eventsR.data ?? []) as Row[];
     const settings = ((setR.data as Row | null)?.data as AppSettings) ?? { toggles: {} };
     const attendeeLeadFields = settings.attendee_lead_fields ?? {};
-    const attendees = ((attendeesR.data ?? []) as Row[]).map((r) => {
-      const attendee = map.rowToAttendee(r);
-      return {
-        ...attendee,
-        lead_fields: attendee.lead_fields?.length
-          ? attendee.lead_fields
-          : attendeeLeadFields[attendee.id] ?? [],
-      };
-    });
+    const attendees = backfillAttribution(
+      ((attendeesR.data ?? []) as Row[]).map((r) => {
+        const attendee = map.rowToAttendee(r);
+        return {
+          ...attendee,
+          lead_fields: attendee.lead_fields?.length
+            ? attendee.lead_fields
+            : attendeeLeadFields[attendee.id] ?? [],
+        };
+      })
+    );
 
     state = {
       v: SEED_VERSION,
@@ -291,10 +329,12 @@ export async function refreshAttendees(): Promise<{ added: number; total: number
     return null;
   }
   const fallback = state.settings.attendee_lead_fields ?? {};
-  const next = ((data ?? []) as Row[]).map((r) => {
-    const a = map.rowToAttendee(r);
-    return { ...a, lead_fields: a.lead_fields?.length ? a.lead_fields : fallback[a.id] ?? [] };
-  });
+  const next = backfillAttribution(
+    ((data ?? []) as Row[]).map((r) => {
+      const a = map.rowToAttendee(r);
+      return { ...a, lead_fields: a.lead_fields?.length ? a.lead_fields : fallback[a.id] ?? [] };
+    })
+  );
   const beforeIds = new Set(state.attendees.map((a) => a.id));
   const added = next.filter((a) => !beforeIds.has(a.id)).length;
   mutate((s) => ({ ...s, attendees: next }));

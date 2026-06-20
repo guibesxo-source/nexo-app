@@ -48,7 +48,7 @@ function isJunk(key: string, value: string): boolean {
   const v = value.trim();
   if (!v) return true;
   if (v.length > 500) return true; // blob
-  if (/^[{[]/.test(v) && v.length > 80) return true; // JSON serializado (hs_context etc.)
+  if (/^(\{"|\[\{)/.test(v) && v.length > 80) return true; // JSON serializado (hs_context etc.) — não confundir com campanha "[D] [BLEAD] ..."
   return false;
 }
 
@@ -74,6 +74,99 @@ const UTM_LABELS: Record<string, string> = {
   utm_id: "UTM ID",
 };
 const UTM_ORDER = ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "utm_id"];
+
+// Posicionamento e audiência do anúncio chegam na URL da LP (não no formulário).
+const PLACEMENT_KEY = "location";
+const AUDIENCE_KEY = "audience";
+
+// hsa_* são os parâmetros do tracking do HubSpot Ads. hsa_src (origem dentro da
+// rede) e hsa_net (rede) viram uma "Plataforma" legível; o resto são IDs técnicos.
+const HSA_SRC_LABEL: Record<string, string> = {
+  ig: "Instagram",
+  fb: "Facebook",
+  an: "Audience Network",
+  msg: "Messenger",
+  ms: "Messenger",
+};
+const HSA_NET_LABEL: Record<string, string> = {
+  facebook: "Meta",
+  fb: "Meta",
+  adwords: "Google Ads",
+  google: "Google Ads",
+  bing: "Microsoft Ads",
+};
+
+/** Valor de parâmetro mais legível: "Instagram_Stories" → "Instagram Stories". */
+function prettyValue(v: string): string {
+  return clean(v.replace(/_+/g, " "));
+}
+
+/** Plataforma do anúncio a partir de hsa_src/hsa_net (ig → Instagram, facebook → Meta). */
+function adPlatform(map: Map<string, string>): string {
+  const src = (map.get("hsa_src") ?? "").toLowerCase();
+  if (HSA_SRC_LABEL[src]) return HSA_SRC_LABEL[src];
+  const net = (map.get("hsa_net") ?? "").toLowerCase();
+  if (HSA_NET_LABEL[net]) return HSA_NET_LABEL[net];
+  return prettyValue(src || net);
+}
+
+/**
+ * Extrai os parâmetros da query string da URL de origem (UTMs, posicionamento,
+ * audiência, rede do anúncio) já decodificados (%2B → "+", "+" → espaço). É daqui
+ * que vem a maior parte da atribuição: a LP manda só o page_url, não esses campos.
+ */
+export function paramsFromUrl(pageUrl: string): Map<string, string> {
+  const out = new Map<string, string>();
+  let search = "";
+  try {
+    search = new URL(pageUrl).search;
+  } catch {
+    const i = pageUrl.indexOf("?");
+    if (i >= 0) search = pageUrl.slice(i);
+  }
+  if (!search) return out;
+  let params: URLSearchParams;
+  try {
+    params = new URLSearchParams(search);
+  } catch {
+    return out;
+  }
+  for (const [rawKey, rawValue] of params) {
+    const key = canon(rawKey);
+    const value = clean(rawValue);
+    if (key && value && !isJunk(key, value) && !out.has(key)) out.set(key, value);
+  }
+  return out;
+}
+
+/**
+ * Campos de atribuição derivados SÓ da URL de origem (UTMs, posicionamento,
+ * audiência, plataforma, clicks de anúncio). Mesma chave/rótulo/origem que o
+ * parser do webhook produz — para casar com a segmentação do dashboard. Usado no
+ * backfill dos inscritos que entraram antes de o parser ler a URL.
+ */
+export function attributionFromUrl(pageUrl: string): LeadField[] {
+  const map = paramsFromUrl(pageUrl);
+  const out: LeadField[] = [];
+  const push = (key: string, label: string, value: string) => {
+    if (value) out.push({ key: `hubspot:${key}`, label, value, source: "hubspot", group: "lead" });
+  };
+  for (const u of UTM_ORDER) {
+    const v = map.get(u);
+    if (v) push(u, UTM_LABELS[u], v);
+  }
+  const placement = map.get(PLACEMENT_KEY);
+  if (placement) push(PLACEMENT_KEY, "Posicionamento", prettyValue(placement));
+  const audience = map.get(AUDIENCE_KEY);
+  if (audience) push(AUDIENCE_KEY, "Audiência", audience);
+  const platform = adPlatform(map);
+  if (platform) push("plataforma", "Plataforma", platform);
+  const gclid = map.get("gclid");
+  if (gclid) push("gclid", "Google Click ID", gclid);
+  const fbclid = map.get("fbclid");
+  if (fbclid) push("fbclid", "Facebook Click ID", fbclid);
+  return out;
+}
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -141,6 +234,14 @@ export function hubspotFormToDraft(
     if (key && value && !isJunk(key, value) && !map.has(key)) map.set(key, value);
   }
 
+  // 1b) A URL de origem carrega a atribuição (UTMs, posicionamento, audiência,
+  //     rede do anúncio). Funde no map — o campo do formulário sempre vence.
+  if (ctx.pageUrl) {
+    for (const [k, v] of paramsFromUrl(ctx.pageUrl)) {
+      if (!map.has(k)) map.set(k, v);
+    }
+  }
+
   const consumed = new Set<string>();
 
   // 2) E-mail (obrigatório) — sinônimo direto, depois qualquer "*email*", por fim
@@ -192,6 +293,17 @@ export function hubspotFormToDraft(
     const v = map.get(u);
     if (v) { consumed.add(u); push(u, UTM_LABELS[u], v); }
   }
+  // Posicionamento, audiência e plataforma do anúncio (vêm na URL da LP).
+  // Obs.: nesta base "location" é o placement do anúncio (Meta), não a cidade do lead.
+  const placement = map.get(PLACEMENT_KEY);
+  if (placement) { consumed.add(PLACEMENT_KEY); push(PLACEMENT_KEY, "Posicionamento", prettyValue(placement)); }
+  const audience = map.get(AUDIENCE_KEY);
+  if (audience) { consumed.add(AUDIENCE_KEY); push(AUDIENCE_KEY, "Audiência", audience); }
+  const platform = adPlatform(map);
+  if (platform) push("plataforma", "Plataforma", platform);
+  // hsa_* (HubSpot Ads): hsa_src/hsa_net já viraram "Plataforma"; o resto são IDs
+  // técnicos redundantes com a URL de origem — descartados p/ não poluir o CRM.
+  for (const k of map.keys()) if (k.startsWith("hsa_")) consumed.add(k);
   const gclid = map.get("gclid");
   if (gclid) { consumed.add("gclid"); push("gclid", "Google Click ID", gclid); }
   const fbclid = map.get("fbclid");
