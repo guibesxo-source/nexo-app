@@ -3,7 +3,7 @@
 /* Inscritos - CRUD, status, busca/filtro, import e export CSV. */
 import { useEffect, useState } from "react";
 import {
-  Avatar, Badge, Empty, Field, Icon, Menu, Modal, PageHead, useToast,
+  Avatar, Badge, ConfirmDialog, Empty, Field, Icon, Menu, Modal, PageHead, useToast,
 } from "@/components/app/kit";
 import { ImportAttendeesModal } from "@/components/app/import-attendees";
 import { useSymplaAutoSync } from "@/components/app/sympla-sync";
@@ -13,6 +13,7 @@ import {
   ATTENDEE_STATUS_META,
   attendeeSignupAt,
   attendeesOf,
+  removeAllAttendees,
   removeAttendee,
   selectedEvent,
   setAttendeeStatus,
@@ -412,6 +413,7 @@ export function Inscritos() {
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
   const [leadOpen, setLeadOpen] = useState<Attendee | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
   // Valores selecionados por faceta (vazio = todas); transitório (não persiste).
   const [facetVal, setFacetVal] = useState<Record<string, string[]>>({});
 
@@ -563,6 +565,18 @@ export function Inscritos() {
             <button className="btn btn-primary" onClick={() => setAdding(true)}>
               <Icon name="plus" size={15} />Adicionar
             </button>
+            {all.length > 0 && (
+              <Menu
+                align="right"
+                items={[
+                  {
+                    label: "Apagar todos os inscritos",
+                    danger: true,
+                    onClick: () => setConfirmClear(true),
+                  },
+                ]}
+              />
+            )}
           </>
         }
       />
@@ -697,6 +711,28 @@ export function Inscritos() {
       {importing && <ImportAttendeesModal eventId={ev.id} onClose={() => setImporting(false)} />}
       {leadOpen && (
         <LeadFieldsModal attendee={leadOpen} columns={leadColumnsOf(all)} onClose={() => setLeadOpen(null)} />
+      )}
+      {confirmClear && (
+        <ConfirmDialog
+          tone="danger"
+          icon="trash"
+          title="Apagar todos os inscritos?"
+          message={
+            <>
+              Isto remove os <b>{all.length} inscrito{all.length === 1 ? "" : "s"}</b> de{" "}
+              <b>{ev.name}</b>. Esta ação não pode ser desfeita.
+            </>
+          }
+          confirmLabel="Apagar todos"
+          cancelLabel="Cancelar"
+          onCancel={() => setConfirmClear(false)}
+          onConfirm={() => {
+            const n = removeAllAttendees(ev.id);
+            setConfirmClear(false);
+            setFacetVal({});
+            toast(`${n} inscrito${n === 1 ? "" : "s"} apagado${n === 1 ? "" : "s"}`);
+          }}
+        />
       )}
     </div>
   );

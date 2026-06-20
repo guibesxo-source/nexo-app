@@ -15,6 +15,9 @@ export const ingestRequestSchema = z.object({
   submittedAt: z.union([z.string(), z.number()]).optional(),
   pageUrl: z.string().optional(),
   pageName: z.string().optional(),
+  // Ping de diagnóstico disparado pelo próprio app ("Testar conexão"): valida o
+  // token/endpoint sem gravar inscrito nem mexer nas estatísticas.
+  test: z.boolean().optional(),
 });
 
 export type IngestRequest = z.infer<typeof ingestRequestSchema>;

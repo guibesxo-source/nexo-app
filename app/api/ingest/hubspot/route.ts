@@ -78,6 +78,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Origem não autorizada" }, { status: 403, headers });
   }
 
+  // Ping de teste do app: token resolvido com sucesso = endpoint no ar. Não grava
+  // inscrito nem incrementa contadores (pra não poluir a lista nem as estatísticas).
+  if (parsed.data.test) {
+    return NextResponse.json({ status: "ok", test: true }, { status: 200, headers });
+  }
+
   const submittedAt = parsed.data.submittedAt != null ? toIso(parsed.data.submittedAt) : undefined;
   const result = hubspotFormToDraft(normalizeFields(parsed.data.fields), {
     submittedAt,

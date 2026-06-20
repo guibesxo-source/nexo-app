@@ -542,6 +542,33 @@ export function removeAttendee(id: string) {
   if (ws()) sbDelete("attendees", id);
 }
 
+/**
+ * Apaga TODOS os inscritos de um evento de uma vez (ação em massa do dash).
+ * Faz uma única mutação e um único delete em lote. Retorna quantos foram removidos.
+ */
+export function removeAllAttendees(eventId: string): number {
+  let ids: string[] = [];
+  let leadSettingsChanged = false;
+  mutate((s) => {
+    ids = s.attendees.filter((a) => a.event_id === eventId).map((a) => a.id);
+    if (!ids.length) return s;
+    const leadStore = removeLeadFieldStoreEntries(s.settings.attendee_lead_fields, ids);
+    leadSettingsChanged = leadStore.changed;
+    return {
+      ...s,
+      attendees: s.attendees.filter((a) => a.event_id !== eventId),
+      settings: leadStore.changed
+        ? { ...s.settings, attendee_lead_fields: leadStore.value }
+        : s.settings,
+    };
+  });
+  if (!ids.length) return 0;
+  if (leadSettingsChanged) saveSettings();
+  if (ws()) sbDelete("attendees", ids);
+  logActivity("🗑️", ["", `${ids.length} inscrito${ids.length === 1 ? "" : "s"}`, " removidos do evento"]);
+  return ids.length;
+}
+
 /* ---------- Checklist ---------- */
 
 export type TaskDraft = Pick<Task, "title" | "group" | "phase" | "assignee_id" | "due_date">;

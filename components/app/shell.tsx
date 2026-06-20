@@ -30,6 +30,7 @@ import {
 } from "@/lib/db";
 import { getState } from "@/lib/db/store";
 import { createClient } from "@/lib/supabase/client";
+import { useLiveAttendees } from "@/components/app/use-live-attendees";
 import { displayNameFromUser } from "@/lib/auth";
 import { fmtDateShort, initialsOf, relTime } from "@/lib/format";
 
@@ -572,6 +573,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const route = routeIdFromPath(pathname);
   const user = ready ? currentUser(db) : undefined;
   const collapsed = db.settings.sidebar_collapsed ?? false;
+
+  // Atualização ao vivo dos inscritos em todo o app (não só na tela de Inscritos).
+  useLiveAttendees();
 
   // Hidrata o estado salvo do navegador uma única vez, no client
   // (sincroniza com o sistema externo; o re-render vem do useHydrated).

@@ -9,10 +9,12 @@ import {
   createContext,
   useContext,
   useEffect,
+  useRef,
   useState,
   type CSSProperties,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 
 /* ---------- Icon set (stroke, currentColor) ---------- */
 export const I: Record<string, string> = {
@@ -504,9 +506,44 @@ export function Menu({ items, trigger, align }: {
   items: MenuItem[]; trigger?: ReactNode; align?: "left" | "right";
 }) {
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLSpanElement>(null);
+  // Posição fixa calculada a partir do gatilho. Renderizado num portal no body
+  // para não ser cortado por containers com overflow (ex.: a tabela de inscritos).
+  const [pos, setPos] = useState<{ top: number; left?: number; right?: number }>({ top: -9999 });
+
+  useEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const t = triggerRef.current;
+      if (!t) return;
+      const r = t.getBoundingClientRect();
+      const mh = menuRef.current?.offsetHeight ?? 0;
+      // Abre pra cima se não couber embaixo (última linha perto do rodapé).
+      const top = mh && r.bottom + 4 + mh > window.innerHeight - 8
+        ? Math.max(8, r.top - mh - 4)
+        : r.bottom + 4;
+      setPos(
+        align === "left"
+          ? { top, left: r.left }
+          : { top, right: Math.max(8, window.innerWidth - r.right) }
+      );
+    };
+    place();
+    // Acompanhar scroll/resize é caro e raramente útil num dropdown: fecha.
+    const close = () => setOpen(false);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [open, align]);
+
   return (
     <span className="menu-wrap" onClick={(e) => e.stopPropagation()}>
       <button
+        ref={triggerRef}
         type="button"
         className="row-action"
         onClick={() => setOpen((o) => !o)}
@@ -514,26 +551,33 @@ export function Menu({ items, trigger, align }: {
       >
         {trigger ?? <Icon name="dots" size={16} />}
       </button>
-      {open && (
-        <>
-          <span className="menu-scrim" onClick={() => setOpen(false)} />
-          <span className={"menu" + (align === "left" ? " left" : "")} role="menu">
-            {items.map((it, i) => (
-              <button
-                type="button"
-                key={i}
-                className={"menu-item" + (it.danger ? " danger" : "")}
-                onClick={() => {
-                  setOpen(false);
-                  it.onClick();
-                }}
-              >
-                {it.label}
-              </button>
-            ))}
-          </span>
-        </>
-      )}
+      {open &&
+        createPortal(
+          <>
+            <span className="menu-scrim" onClick={() => setOpen(false)} />
+            <span
+              ref={menuRef}
+              className={"menu" + (align === "left" ? " left" : "")}
+              role="menu"
+              style={{ top: pos.top, left: pos.left, right: pos.right }}
+            >
+              {items.map((it, i) => (
+                <button
+                  type="button"
+                  key={i}
+                  className={"menu-item" + (it.danger ? " danger" : "")}
+                  onClick={() => {
+                    setOpen(false);
+                    it.onClick();
+                  }}
+                >
+                  {it.label}
+                </button>
+              ))}
+            </span>
+          </>,
+          document.body
+        )}
     </span>
   );
 }

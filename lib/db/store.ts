@@ -10,7 +10,7 @@ import { seedState, SEED_VERSION, type DbState } from "./seed";
 import { createClient } from "@/lib/supabase/client";
 import { displayNameFromUser } from "@/lib/auth";
 import { seedWorkspace } from "./seed-supabase";
-import type { AppSettings, TaskAttachment } from "@/types";
+import type { AppSettings, IngestEndpoint, TaskAttachment } from "@/types";
 import * as map from "./supabase-map";
 
 type Sb = ReturnType<typeof createClient>;
@@ -299,6 +299,27 @@ export async function refreshAttendees(): Promise<{ added: number; total: number
   const added = next.filter((a) => !beforeIds.has(a.id)).length;
   mutate((s) => ({ ...s, attendees: next }));
   return { added, total: next.length };
+}
+
+/**
+ * Relê só os endpoints de ingestão do banco e mescla no estado. O webhook grava
+ * `received_count`/`last_received_at` direto no Postgres (service role); aqui a UI
+ * apenas relê — é o que deixa o modal do webhook mostrar, ao vivo, que a LP já
+ * está enviando de verdade. Retorna a lista atualizada (ou null se não conectado).
+ */
+export async function refreshIngestEndpoints(): Promise<IngestEndpoint[] | null> {
+  if (!workspaceId || typeof window === "undefined") return null;
+  const { data, error } = await client()
+    .from("ingest_endpoints")
+    .select("*")
+    .order("created_at", { ascending: false });
+  if (error) {
+    logErr("refresh ingest_endpoints", error);
+    return null;
+  }
+  const next = ((data ?? []) as Row[]).map(map.rowToIngestEndpoint);
+  mutate((s) => ({ ...s, ingestEndpoints: next }));
+  return next;
 }
 
 /** Logout: limpa o estado em memória e volta ao seed neutro (o signOut é da UI). */
