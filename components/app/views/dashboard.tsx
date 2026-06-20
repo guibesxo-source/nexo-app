@@ -43,6 +43,7 @@ import {
 } from "@/lib/db";
 import { daysUntil, fmtMoney, relTime } from "@/lib/format";
 import type {
+  Activity,
   CustomMetricAgg,
   CustomMetricSource,
   DashboardConfig,
@@ -187,6 +188,53 @@ function layoutWidgets(widgets: DashboardWidget[], cols: number): { widget: Dash
   }
   flush();
   return out;
+}
+
+/** Agrupa atividades CONSECUTIVAS de mesmo ícone+texto numa só linha (com
+   contagem), mantendo o horário mais recente — colapsa o eco do sync automático
+   que já está no histórico, sem perder as ações distintas. */
+function groupActivity(items: Activity[]): (Activity & { count: number })[] {
+  const out: (Activity & { count: number })[] = [];
+  const sig = (a: Activity) => a.icon + "|" + a.text.join(" ");
+  for (const a of items) {
+    const last = out[out.length - 1];
+    if (last && sig(last) === sig(a)) last.count += 1;
+    else out.push({ ...a, count: 1 });
+  }
+  return out;
+}
+
+/* ---------- navegação: cada widget aponta p/ a tela da sua fonte de dados ---------- */
+const METRIC_DEST: Record<string, string> = {
+  total: "inscritos", confirmed: "inscritos", pending: "inscritos", checkin: "inscritos",
+  confirmRate: "inscritos", neededPerDay: "inscritos",
+  income: "financeiro", spent: "financeiro", available: "financeiro", budgetPct: "financeiro",
+  costPerAttendee: "financeiro", costPerConfirmed: "financeiro",
+  revenuePerAttendee: "financeiro", resultPerAttendee: "financeiro",
+  tasksDone: "checklist", tasksLate: "checklist",
+};
+const DEST_LABEL: Record<string, string> = {
+  inscritos: "Inscritos", financeiro: "Financeiro", checklist: "Checklist",
+};
+
+/** Tela de destino de uma métrica (catálogo ou personalizada). */
+function destForMetric(key: string, cfg: DashboardConfig): string | null {
+  if (METRIC_DEST[key]) return METRIC_DEST[key];
+  const cm = cfg.customMetrics.find((m) => m.id === key);
+  return cm ? cm.source : null;
+}
+
+/** Tela de destino de um widget (KPI → fonte da métrica; blocos → sua área). */
+function destForWidget(w: DashboardWidget, cfg: DashboardConfig): string | null {
+  switch (w.type) {
+    case "kpi": return destForMetric(w.metric ?? "", cfg);
+    case "chart-signups":
+    case "chart-confirm": return "inscritos";
+    case "chart-category":
+    case "block-cost": return "financeiro";
+    case "list-progress": return "checklist";
+    default: return null;
+  }
 }
 
 /** Move dragId para a posição de overId, devolvendo a nova ordem de ids. */
@@ -643,6 +691,9 @@ export function Dashboard({ eventId }: { eventId?: string }) {
     { icon: "sparkle", tone: undefined as string | undefined, label: "Métrica removida", value: "—" };
 
   const renderWidget = (w: DashboardWidget) => {
+    // Fora do modo edição, cada widget leva à tela da sua fonte de dados.
+    const dest = editing ? null : destForWidget(w, cfg);
+    const navLink = dest ? { label: `Abrir ${DEST_LABEL[dest] ?? "tela"}`, go: () => go(dest) } : null;
     switch (w.type) {
       case "kpi": {
         const r = resolveKpi(w);
@@ -651,12 +702,20 @@ export function Dashboard({ eventId }: { eventId?: string }) {
           .filter((m): m is NonNullable<typeof m> => !!m)
           .map((m) => ({ icon: m.icon, tone: m.tone, value: m.value, label: m.label }));
         const foot = w.metric ? metricInsight(w.metric, k, ev) : null;
-        return <Kpi icon={r.icon} iconTone={r.tone} value={r.value} label={r.label} side={side} foot={foot ?? undefined} />;
+        return (
+          <Kpi
+            icon={r.icon} iconTone={r.tone} value={r.value} label={r.label}
+            side={side} foot={foot ?? undefined}
+            onClick={navLink ? navLink.go : undefined}
+          />
+        );
       }
       case "chart-signups":
         return (
           <Card
             title="Inscritos por data"
+            link={navLink?.label}
+            onLink={navLink?.go}
             actions={
               <div className="dash-calendar-wrap">
                 <button
@@ -779,22 +838,47 @@ export function Dashboard({ eventId }: { eventId?: string }) {
             <BarChart data={signups} />
           </Card>
         );
-      case "chart-confirm":
+      case "chart-confirm": {
+        const presenceRate = k.confirmed > 0 ? Math.round((k.checkin / k.confirmed) * 100) : 0;
+        const confStats: { ic: string; label: string; value: string; tone?: string }[] = [
+          { ic: "users", label: "Inscritos", value: String(k.total) },
+          { ic: "ticket", label: "Check-in", value: String(k.checkin) },
+          { ic: "trending", label: "Presença", value: presenceRate + "%", tone: presenceRate >= 50 ? "pos" : undefined },
+          k.goal > 0
+            ? { ic: "bolt", label: "Faltam p/ meta", value: String(k.remainingSeats) }
+            : { ic: "clock", label: "Pendentes", value: String(k.pending) },
+        ];
         return (
-          <Card title="Confirmação">
-            <Donut
-              pct={k.confirmRate}
-              label="conf."
-              legend={[
-                { color: "var(--green)", label: "Confirmados", value: String(k.confirmed) },
-                { color: "#E8E8E5", label: "Pendentes", value: String(k.pending) },
-              ]}
-            />
+          <Card title="Confirmação" link={navLink?.label} onLink={navLink?.go}>
+            <div className="confirm-widget">
+              <div className="donut-wrap">
+                <Donut
+                  pct={k.confirmRate}
+                  label="conf."
+                  legend={[
+                    { color: "var(--green)", label: "Confirmados", value: String(k.confirmed) },
+                    { color: "#E8E8E5", label: "Pendentes", value: String(k.pending) },
+                  ]}
+                />
+              </div>
+              <div className="confirm-stats">
+                {confStats.map((s, i) => (
+                  <div className="confirm-stat" key={i}>
+                    <span className="confirm-stat-ic"><Icon name={s.ic} size={15} /></span>
+                    <span className="confirm-stat-meta">
+                      <span className={"confirm-stat-v" + (s.tone === "pos" ? " pos" : "")}>{s.value}</span>
+                      <span className="confirm-stat-l">{s.label}</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
           </Card>
         );
+      }
       case "block-cost":
         return (
-          <Card title="Custo por inscrito">
+          <Card title="Custo por inscrito" link={navLink?.label} onLink={navLink?.go}>
             <CostPanel k={k} capacity={ev.capacity} />
           </Card>
         );
@@ -817,7 +901,7 @@ export function Dashboard({ eventId }: { eventId?: string }) {
         );
       case "chart-category":
         return (
-          <Card title="Gastos por categoria">
+          <Card title="Gastos por categoria" link={navLink?.label} onLink={navLink?.go}>
             {cats.length === 0 ? (
               <Empty icon="wallet" title="Sem lançamentos" sub="As despesas do evento aparecem aqui." />
             ) : (
@@ -833,18 +917,41 @@ export function Dashboard({ eventId }: { eventId?: string }) {
             )}
           </Card>
         );
-      case "list-activity":
+      case "list-activity": {
+        const grouped = groupActivity(db.activity);
+        const nowMs = new Date().getTime();
+        const actions24h = db.activity.filter(
+          (a) => nowMs - new Date(a.created_at).getTime() < 86400000
+        ).length;
+        const lastSync = symplaSync.link?.last_sync_at;
         return (
           <Card title="Atividade recente">
-            {db.activity.length === 0 ? (
+            <div className="act-insights">
+              <div className="act-insight">
+                <span className="act-insight-v">{signupToday}</span>
+                <span className="act-insight-l">novos hoje</span>
+              </div>
+              <div className="act-insight">
+                <span className="act-insight-v">{actions24h}</span>
+                <span className="act-insight-l">ações em 24h</span>
+              </div>
+              <div className="act-insight">
+                <span className="act-insight-v">{lastSync ? relTime(lastSync).replace(/^há /, "") : "—"}</span>
+                <span className="act-insight-l">desde a sync</span>
+              </div>
+            </div>
+            {grouped.length === 0 ? (
               <Empty icon="bolt" title="Sem atividade ainda" sub="As ações da equipe aparecem aqui." />
             ) : (
               <div className="activity">
-                {db.activity.slice(0, 5).map((a) => (
+                {grouped.slice(0, 5).map((a) => (
                   <div className="act-row" key={a.id}>
                     <span className="act-ic">{a.icon}</span>
                     <div className="act-body">
-                      <div className="act-txt">{a.text.map((s, j) => (j % 2 ? <b key={j}>{s}</b> : s))}</div>
+                      <div className="act-txt">
+                        {a.text.map((s, j) => (j % 2 ? <b key={j}>{s}</b> : s))}
+                        {a.count > 1 && <span className="act-count">{a.count}×</span>}
+                      </div>
                       <div className="act-time">{relTime(a.created_at)}</div>
                     </div>
                   </div>
@@ -853,6 +960,7 @@ export function Dashboard({ eventId }: { eventId?: string }) {
             )}
           </Card>
         );
+      }
       case "list-progress":
         return (
           <Card title="Progresso por área">
