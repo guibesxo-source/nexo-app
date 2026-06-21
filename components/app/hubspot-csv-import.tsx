@@ -7,7 +7,7 @@
 import { useRef, useState } from "react";
 import { Icon, Modal, useToast } from "@/components/app/kit";
 import { importAttendees, type AttendeeDraft } from "@/lib/db";
-import { parseCsv } from "@/lib/csv";
+import { readTabularFile, ACCEPTED_IMPORT_EXTENSIONS } from "@/lib/spreadsheet";
 import { hubspotFormToDraft } from "@/lib/integrations/hubspot-form";
 
 const norm = (s: string) =>
@@ -85,7 +85,7 @@ export function HubspotCsvImportModal({ eventId, eventName, onClose }: {
   const readFile = async (file: File) => {
     setError("");
     try {
-      const built = buildDrafts(parseCsv(await file.text()));
+      const built = buildDrafts(await readTabularFile(file));
       if (built.drafts.length === 0) {
         setParsed(null);
         setError("Nenhuma linha com email válido — confira se exportou as submissões do formulário.");
@@ -93,7 +93,7 @@ export function HubspotCsvImportModal({ eventId, eventName, onClose }: {
       }
       setParsed({ fileName: file.name, ...built });
     } catch {
-      setError("Não consegui ler esse arquivo. Exporte como CSV e tente de novo.");
+      setError("Não consegui ler esse arquivo. Aceito CSV e planilhas (xlsx, xls, ods).");
     }
   };
 
@@ -131,7 +131,7 @@ export function HubspotCsvImportModal({ eventId, eventName, onClose }: {
       <input
         ref={fileRef}
         type="file"
-        accept=".csv,text/csv"
+        accept={ACCEPTED_IMPORT_EXTENSIONS}
         style={{ display: "none" }}
         onChange={(e) => e.target.files?.[0] && readFile(e.target.files[0])}
       />

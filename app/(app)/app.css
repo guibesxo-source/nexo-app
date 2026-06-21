@@ -852,32 +852,169 @@ input, select, textarea { font-family: inherit; }
   align-items: stretch;
 }
 /* Faixa de destaques dinâmicos (KPIs mais úteis agora) — acima da grade.
-   Tratamento SECUNDÁRIO: menor e mais sutil, pra diferenciar do dashboard central. */
+   Tratamento SECUNDÁRIO em PÍLULAS: cada destaque é um chip que abraça seu
+   conteúdo (não estica em colunas iguais), fluindo numa fileira que quebra
+   sozinha. Ícone tonal sinaliza urgência; tudo discreto ao lado dos dashs. */
 .dash-highlights {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-  gap: 12px;
-  margin-bottom: 20px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 18px;
 }
 .dash-highlights .kpi {
-  padding: 12px 14px 11px;
-  background: transparent;
-  border-style: dashed;
-  opacity: 0.78;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 300px;
+  padding: 5px 13px 5px 6px;
+  border-radius: 999px;
+  background: var(--panel);
+  border: 1px solid var(--line-2);
+  opacity: 1;
 }
-.dash-highlights .kpi:hover { opacity: 1; background: var(--white); border-style: solid; }
-.dash-highlights .kpi-top { margin-bottom: 8px; }
-.dash-highlights .kpi-ic { width: 30px; height: 30px; border-radius: 9px; }
-.dash-highlights .kpi-ic svg { width: 15px; height: 15px; }
-.dash-highlights .kpi-val { font-size: 21px; }
-.dash-highlights .kpi-lbl { font-size: 11.5px; margin-top: 4px; }
-.dash-highlights .kpi-foot { margin-top: 8px; font-size: 11px; }
+.dash-highlights .kpi:hover { background: var(--white); border-color: var(--line); }
+/* Conteúdo da pílula numa só linha: [ícone] valor · rótulo · rodapé. */
+.dash-highlights .kpi-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.dash-highlights .kpi-top { margin: 0; flex: none; }
+.dash-highlights .kpi-ic { width: 26px; height: 26px; border-radius: 999px; border-color: transparent; }
+.dash-highlights .kpi-ic svg { width: 13px; height: 13px; }
+.dash-highlights .kpi-ic.red { background: var(--red-soft); color: var(--red); }
+.dash-highlights .kpi-ic.amber { background: var(--amber-soft); color: var(--amber); }
+.dash-highlights .kpi-ic.blue { background: var(--blue-soft); color: var(--blue); }
+.dash-highlights .kpi-ic.green { background: var(--green-soft); color: var(--green-deep); }
+.dash-highlights .kpi-val {
+  font-size: 14px; font-weight: 800; line-height: 1; flex: none;
+  max-width: 130px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.dash-highlights .kpi-lbl {
+  font-size: 11.5px; margin: 0; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.dash-highlights .kpi-foot {
+  margin: 0; flex: none; font-size: 11px; gap: 5px;
+  padding-left: 8px; border-left: 1px solid var(--line);
+}
 /* Segmentação de leads (cards por atributo do lead) — abaixo da grade. */
-.leadseg { margin-top: 24px; }
+/* ============================================================
+   INTELIGÊNCIA DE LEADS — segmentação enriquecida (leitura viva
+   da base: líder, concentração, cauda e cobertura por atributo).
+   ============================================================ */
+.leadseg { margin-top: 28px; }
+.leadseg-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 14px; flex-wrap: wrap; margin-bottom: 13px;
+}
+.leadseg-eyebrow {
+  font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--muted); display: inline-flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+}
+.leadseg-hint { font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dim); font-size: 12.5px; }
+.leadseg-summary {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 7px 13px 7px 11px; border-radius: 99px;
+  background: var(--green-soft); border: 1px solid color-mix(in srgb, var(--green) 32%, transparent);
+  font-size: 12.5px; color: var(--text);
+}
+.leadseg-summary svg { color: var(--green-deep); flex-shrink: 0; }
+.leadseg-summary b { font-weight: 800; }
+.leadseg-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
+
 .leadseg-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(248px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(322px, 1fr));
   gap: 16px;
+}
+
+.seg-card {
+  display: flex; flex-direction: column; gap: 14px;
+  padding: 17px 17px 15px;
+  background: var(--white); border: 1px solid var(--line); border-radius: var(--r-lg);
+  animation: dashIn 0.32s var(--ease) both;
+  transition: border-color 0.16s var(--ease), box-shadow 0.16s var(--ease), transform 0.16s var(--ease);
+}
+.seg-card:hover { border-color: var(--line-strong); box-shadow: var(--shadow-md); transform: translateY(-2px); }
+
+.seg-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.seg-card-title { font-size: 14px; font-weight: 800; letter-spacing: -0.02em; }
+.seg-cov { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; color: var(--dim); white-space: nowrap; }
+.seg-cov svg { color: var(--faint); }
+.seg-cov em { font-style: normal; color: var(--faint); }
+.seg-cov.low { color: var(--amber); }
+.seg-cov.low svg { color: var(--amber); }
+
+/* herói: marcador verde do líder (assinatura Nexo) + anel de concentração */
+.seg-hero {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  padding: 13px 14px; border-radius: var(--r-md);
+  background: var(--panel); border: 1px solid var(--line-2);
+}
+.seg-hero-main { min-width: 0; }
+.seg-hero-mark {
+  display: inline-block; max-width: 100%;
+  font-size: 17px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.25;
+  color: #000; background: var(--green); padding: 1px 9px; border-radius: 7px;
+  transform: rotate(-1.4deg);
+  box-shadow: 0 6px 18px -6px var(--green-glow);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom;
+}
+.seg-hero-sub { font-size: 12px; color: var(--dim); margin-top: 9px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.seg-hero-sub b { color: var(--text); font-weight: 800; }
+.seg-hero-gap {
+  font-size: 10.5px; font-weight: 700; color: var(--green-deep);
+  background: var(--green-soft); padding: 2px 7px; border-radius: 99px;
+}
+
+.seg-ring {
+  --p: 0;
+  width: 60px; height: 60px; flex-shrink: 0; border-radius: 99px;
+  display: grid; place-items: center; position: relative;
+  background: conic-gradient(var(--green) calc(var(--p) * 1%), var(--ring-track) 0);
+}
+.seg-ring::before { content: ""; position: absolute; inset: 5px; border-radius: 99px; background: var(--white); }
+.seg-ring-in { position: relative; text-align: center; line-height: 1; }
+.seg-ring-in b { display: block; font-size: 14.5px; font-weight: 800; letter-spacing: -0.03em; }
+.seg-ring-in span { font-size: 8.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); }
+
+/* ranking dos valores */
+.seg-rows { display: flex; flex-direction: column; gap: 11px; }
+.seg-row { display: grid; grid-template-columns: 18px 1fr 64px auto; align-items: center; gap: 10px; }
+.seg-rank {
+  width: 18px; height: 18px; border-radius: 99px; display: grid; place-items: center;
+  font-size: 10.5px; font-weight: 700; color: var(--dim);
+  background: var(--panel); border: 1px solid var(--line-2);
+}
+.seg-row.lead .seg-rank { background: var(--green); border-color: var(--green); color: #000; }
+.seg-row.tail .seg-rank { background: transparent; border-style: dashed; color: var(--faint); }
+.seg-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.seg-row.lead .seg-name { font-weight: 700; }
+.seg-row.tail .seg-name { color: var(--dim); font-style: italic; }
+.seg-bar { height: 7px; background: var(--panel); border-radius: 99px; overflow: hidden; }
+.seg-bar i {
+  display: block; height: 100%; min-width: 3px; border-radius: 99px;
+  background: var(--faint); transition: width 0.6s var(--ease);
+}
+.seg-row.lead .seg-bar i { background: linear-gradient(90deg, var(--green-deep), var(--green)); }
+.seg-row.tail .seg-bar i { background: var(--line-strong); opacity: 0.5; }
+.seg-val { font-size: 12.5px; font-weight: 800; letter-spacing: -0.01em; text-align: right; white-space: nowrap; }
+.seg-val em { font-style: normal; font-weight: 600; color: var(--dim); margin-left: 6px; }
+
+/* leitura: insights derivados do atributo */
+.seg-insights { display: flex; flex-direction: column; gap: 7px; padding-top: 13px; border-top: 1px solid var(--line-2); }
+.seg-insight { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; color: var(--muted); line-height: 1.45; }
+.seg-insight-dot { width: 6px; height: 6px; border-radius: 99px; margin-top: 5px; flex-shrink: 0; background: var(--dim); }
+.seg-insight.green .seg-insight-dot { background: var(--green-deep); }
+.seg-insight.blue .seg-insight-dot { background: var(--blue); }
+.seg-insight.amber .seg-insight-dot { background: var(--amber); }
+.seg-insight.red .seg-insight-dot { background: var(--red); }
+
+@media (prefers-reduced-motion: reduce) {
+  .seg-card { animation: none; }
+  .seg-card:hover { transform: none; }
+  .seg-bar i { transition: none; }
 }
 .dash-widget {
   position: relative; min-width: 0; display: flex; flex-direction: column;
@@ -1754,6 +1891,41 @@ select.input { appearance: none; background-image: linear-gradient(45deg, transp
   font-size: 13px;
 }
 .import-summary b { color: var(--text); }
+
+/* estado "analisando" do dropzone + varredura inteligente */
+.dropzone.is-scanning {
+  border-style: solid; border-color: var(--green-deep);
+  background: var(--green-soft); color: var(--green-deep); cursor: progress;
+}
+.dropzone.is-scanning svg { animation: import-spin 0.9s linear infinite; }
+@keyframes import-spin { to { transform: rotate(360deg); } }
+
+.import-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(86px, 1fr)); gap: 8px; margin-top: 14px; }
+.import-stat {
+  display: flex; flex-direction: column; gap: 2px; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--panel);
+}
+.import-stat .n { font-size: 20px; font-weight: 800; line-height: 1; letter-spacing: -0.02em; color: var(--text); }
+.import-stat .l { font-size: 11.5px; color: var(--dim); }
+.import-stat.new { border-color: var(--green-deep); background: var(--green-soft); }
+.import-stat.new .n { color: var(--green-deep); }
+.import-stat.warn { border-color: color-mix(in srgb, var(--amber) 40%, transparent); background: var(--amber-soft); }
+.import-stat.warn .n { color: var(--amber); }
+
+.import-scan {
+  display: flex; flex-direction: column; gap: 8px; margin-top: 12px;
+  padding: 12px 13px; border-radius: var(--r-sm);
+  border: 1px solid var(--line); background: var(--panel); font-size: 12.5px; color: var(--text);
+}
+.import-scan-row { display: flex; align-items: flex-start; gap: 8px; line-height: 1.5; }
+.import-scan-row > svg { flex-shrink: 0; margin-top: 2px; color: var(--green-deep); }
+.import-tag {
+  display: inline-flex; align-items: center; gap: 4px; margin: 0 4px 4px 0;
+  padding: 2px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600;
+  background: var(--green-soft); color: var(--green-deep);
+}
+.import-tag em { font-style: normal; font-weight: 500; color: var(--dim); }
+.import-tag.soft { background: var(--white); border: 1px solid var(--line); color: var(--text); font-weight: 500; }
 
 /* lista de itens nos modais de integração (Sympla, HubSpot) */
 .sympla-list, .import-list {
