@@ -74,8 +74,14 @@ export function newId(): string {
 
 /* ---------- Write-through (fire-and-forget; no-op se não conectado) ---------- */
 
-function logErr(ctx: string, error: { message?: string } | null) {
-  if (error) console.error(`[db] ${ctx}:`, error.message ?? error);
+function logErr(ctx: string, error: { message?: string; code?: string } | null) {
+  if (!error) return;
+  // 23505 = unique_violation. O write-through é best-effort e a memória é a fonte
+  // da verdade (o reload relê do banco). Uma linha que já existe — corrida do
+  // webhook, reimport, ou e-mail repetido sob a trava — é esperada e benigna,
+  // então não polui o console com erro.
+  if (error.code === "23505") return;
+  console.error(`[db] ${ctx}:`, error.message ?? error);
 }
 
 export function sbInsert(table: string, rows: Row | Row[]) {

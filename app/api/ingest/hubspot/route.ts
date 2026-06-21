@@ -124,6 +124,13 @@ export async function POST(request: Request) {
     created_at: createdAt,
   });
   if (insErr) {
+    // Corrida: o embed do HubSpot dispara onFormSubmit + onFormSubmitted, então a
+    // LP pode mandar dois POSTs quase simultâneos. A checagem acima não é atômica;
+    // o índice único (event_id, lower(email)) barra o segundo com 23505 — tratamos
+    // como duplicado (não erro), sem bumpar contador nem poluir o feed.
+    if (insErr.code === "23505") {
+      return NextResponse.json({ status: "skipped" }, { status: 200, headers });
+    }
     return NextResponse.json({ error: "Falha ao salvar inscrito" }, { status: 500, headers });
   }
 
