@@ -119,7 +119,12 @@ export async function syncSymplaEvent({
   });
 }
 
-export function useSymplaAutoSync(eventId: string | null, intervalMs = 60000) {
+/* Controle do Sympla na tela de Inscritos: expõe o disparo manual ("Sync
+   Sympla"), o estado (busy/erro/último resultado) e o vínculo do evento. A
+   sincronização CONTÍNUA (24h, todos os eventos) roda global no AppShell via
+   useLiveSympla — aqui só fazemos UM sync imediato ao abrir/trocar o evento,
+   pra lista já chegar fresca, sem duplicar o polling do app. */
+export function useSymplaAutoSync(eventId: string | null) {
   const db = useDb();
   const token = db.settings.sympla_token ?? "";
   const link = eventId ? db.settings.sympla_event_links?.[eventId] : undefined;
@@ -153,15 +158,12 @@ export function useSymplaAutoSync(eventId: string | null, intervalMs = 60000) {
     }
   }, [eventId, linkEventId, linkEventName, linkFieldKeys, token]);
 
+  // Um sync imediato ao abrir/trocar o evento (a continuidade é do useLiveSympla).
   useEffect(() => {
     if (!eventId || !token || !linkEventId) return;
-    const first = window.setTimeout(() => { void syncNow(); }, 1500);
-    const timer = window.setInterval(() => { void syncNow(); }, intervalMs);
-    return () => {
-      window.clearTimeout(first);
-      window.clearInterval(timer);
-    };
-  }, [eventId, intervalMs, linkEventId, syncNow, token]);
+    const first = window.setTimeout(() => { void syncNow(); }, 1200);
+    return () => window.clearTimeout(first);
+  }, [eventId, linkEventId, syncNow, token]);
 
   return { link, busy, error, lastResult, syncNow };
 }

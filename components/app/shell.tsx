@@ -31,6 +31,7 @@ import {
 import { getState } from "@/lib/db/store";
 import { createClient } from "@/lib/supabase/client";
 import { useLiveAttendees } from "@/components/app/use-live-attendees";
+import { useLiveSympla } from "@/components/app/use-live-sympla";
 import { displayNameFromUser } from "@/lib/auth";
 import { fmtDateShort, initialsOf, relTime } from "@/lib/format";
 
@@ -575,7 +576,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   const collapsed = db.settings.sidebar_collapsed ?? false;
 
   // Atualização ao vivo dos inscritos em todo o app (não só na tela de Inscritos).
+  // HubSpot: relê o que o webhook empurrou. Sympla: puxa da API sozinho, 24h,
+  // pra todos os eventos vinculados — sem abrir o evento e rodar sync na mão.
   useLiveAttendees();
+  useLiveSympla();
 
   // Hidrata o estado salvo do navegador uma única vez, no client
   // (sincroniza com o sistema externo; o re-render vem do useHydrated).
