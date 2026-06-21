@@ -25,7 +25,7 @@ import {
   eventKpis,
   firstSignupDate,
   formatMetricValue,
-  leadBreakdown,
+  leadSegmentAnalysis,
   leadSegmentFields,
   METRIC_CATALOG,
   metricInsight,
@@ -40,6 +40,7 @@ import {
   updateDashboardWidget,
   useDb,
   type EventKpis,
+  type LeadSegmentAnalysis,
 } from "@/lib/db";
 import { daysUntil, fmtMoney, relTime } from "@/lib/format";
 import type {
@@ -1141,58 +1142,127 @@ export function Dashboard({ eventId }: { eventId?: string }) {
         </div>
       )}
 
-      {leadOptions.length > 0 && (
-        <div className="leadseg">
-          <div className="integ-section" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            Segmentação de leads
-            <span style={{ fontWeight: 500, color: "var(--dim)", fontSize: 12.5 }}>
-              · clique para escolher os atributos
-            </span>
-          </div>
-          <div className="row" style={{ gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
-            {leadOptions.map((o) => (
-              <button
-                key={o.key}
-                className={"chip" + (selectedBreakdowns.includes(o.key) ? " active" : "")}
-                onClick={() => toggleBreakdown(o.key)}
-              >
-                {o.label}
-              </button>
-            ))}
-          </div>
-          {selectedBreakdowns.length === 0 ? (
-            <Empty
-              icon="users"
-              title="Nenhum atributo selecionado"
-              sub="Clique nos atributos acima para ver a distribuição dos leads."
-            />
-          ) : (
-            <div className="leadseg-grid">
-              {selectedBreakdowns.map((key) => {
-                const opt = leadOptions.find((o) => o.key === key);
-                const rows = leadBreakdown(db, ev.id, key);
-                if (!opt || rows.length === 0) return null;
-                const top = rows[0].count;
-                return (
-                  <Card key={key} title={opt.label}>
-                    <div className="cat-list">
-                      {rows.map((r) => (
-                        <div className="cat-row" key={r.value}>
-                          <span className="cat-nm" title={r.value}>{r.value}</span>
-                          <span className="cat-bar">
-                            <i style={{ width: (top ? Math.round((r.count / top) * 100) : 0) + "%" }} />
-                          </span>
-                          <span className="cat-vl">{r.count} · {r.pct}%</span>
-                        </div>
-                      ))}
-                    </div>
-                  </Card>
-                );
-              })}
+      {leadOptions.length > 0 && (() => {
+        // Análises dos atributos escolhidos — base dos cards e do headline da seção.
+        const analyses = selectedBreakdowns
+          .map((key) => {
+            const opt = leadOptions.find((o) => o.key === key);
+            return opt ? leadSegmentAnalysis(db, ev.id, key, opt.label) : null;
+          })
+          .filter((a): a is LeadSegmentAnalysis => !!a && a.rows.length > 0);
+        // Headline vivo: o atributo mais concentrado entre os selecionados.
+        const headline = [...analyses].sort((a, b) => b.top3Share - a.top3Share)[0] ?? null;
+
+        return (
+          <div className="leadseg">
+            <div className="leadseg-head">
+              <div className="leadseg-eyebrow">
+                Inteligência de leads
+                <span className="leadseg-hint">· clique para escolher os atributos</span>
+              </div>
+              {headline?.leader && (
+                <div className="leadseg-summary">
+                  <Icon name="sparkle" size={13} />
+                  <span>
+                    <b>{headline.leader.value}</b> concentra <b>{headline.leader.pct}%</b> em{" "}
+                    {headline.label.toLowerCase()}
+                  </span>
+                </div>
+              )}
             </div>
-          )}
-        </div>
-      )}
+
+            <div className="leadseg-chips">
+              {leadOptions.map((o) => (
+                <button
+                  key={o.key}
+                  className={"chip" + (selectedBreakdowns.includes(o.key) ? " active" : "")}
+                  onClick={() => toggleBreakdown(o.key)}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+
+            {analyses.length === 0 ? (
+              <Empty
+                icon="users"
+                title="Nenhum atributo selecionado"
+                sub="Clique nos atributos acima para ver a leitura dos leads."
+              />
+            ) : (
+              <div className="leadseg-grid">
+                {analyses.map((a) => {
+                  const leader = a.leader!;
+                  return (
+                    <div className="seg-card" key={a.key}>
+                      <div className="seg-card-head">
+                        <span className="seg-card-title">{a.label}</span>
+                        <span className={"seg-cov" + (a.coverage < 60 ? " low" : "")}>
+                          <Icon name="users" size={12} />
+                          {a.total} {a.total === 1 ? "lead" : "leads"}
+                          {a.coverage < 100 && <em> · {a.coverage}%</em>}
+                        </span>
+                      </div>
+
+                      <div className="seg-hero">
+                        <div className="seg-hero-main">
+                          <span className="seg-hero-mark" title={leader.value}>{leader.value}</span>
+                          <div className="seg-hero-sub">
+                            <b>{leader.count}</b> {leader.count === 1 ? "lead" : "leads"} · {leader.pct}%
+                            {a.leadGap > 0 && (
+                              <span className="seg-hero-gap">+{a.leadGap} pts vs 2º</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="seg-ring" style={{ "--p": a.top3Share } as CSSProperties}>
+                          <div className="seg-ring-in">
+                            <b>{a.top3Share}%</b>
+                            <span>top 3</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="seg-rows">
+                        {a.rows.map((r, i) => (
+                          <div className={"seg-row" + (i === 0 ? " lead" : "")} key={r.value}>
+                            <span className="seg-rank">{i + 1}</span>
+                            <span className="seg-name" title={r.value}>{r.value}</span>
+                            <span className="seg-bar">
+                              <i style={{ width: (a.maxCount ? Math.round((r.count / a.maxCount) * 100) : 0) + "%" }} />
+                            </span>
+                            <span className="seg-val">{r.count}<em>{r.pct}%</em></span>
+                          </div>
+                        ))}
+                        {a.tailCount > 0 && (
+                          <div className="seg-row tail">
+                            <span className="seg-rank">+</span>
+                            <span className="seg-name">outros {a.tailCount} valores</span>
+                            <span className="seg-bar">
+                              <i style={{ width: (a.maxCount ? Math.round((a.tailLeads / a.maxCount) * 100) : 0) + "%" }} />
+                            </span>
+                            <span className="seg-val">{a.tailLeads}<em>{a.tailPct}%</em></span>
+                          </div>
+                        )}
+                      </div>
+
+                      {a.insights.length > 0 && (
+                        <div className="seg-insights">
+                          {a.insights.map((it, i) => (
+                            <div className={"seg-insight " + it.tone} key={i}>
+                              <span className="seg-insight-dot" />
+                              {it.text}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {adding && (
         <AddWidgetModal eventId={ev.id} cfg={cfg} k={k} onClose={() => setAdding(false)} />

@@ -64,6 +64,126 @@ function leadSearchText(a: Attendee) {
   return leadFieldsOf(a).map((field) => `${field.label} ${field.value}`).join(" ");
 }
 
+/* Detector de "duplicados aproximados": a mesma pessoa que se inscreveu mais de
+   uma vez com e-mail/nome digitado diferente. A trava do banco só pega e-mail
+   IDÊNTICO; aqui o sinal é o telefone igual. Nunca apaga sozinho — só sinaliza
+   pro usuário escolher quem fica (a 2ª inscrição costuma ser a correção). */
+
+/** Campo de telefone do lead (qualquer origem: HubSpot, Sympla, CSV). */
+function phoneFieldOf(a: Attendee) {
+  return leadFieldsOf(a).find(
+    (f) =>
+      /(?::|^)(telefone|phone|celular|whatsapp)$/.test(f.key.toLowerCase()) ||
+      /(telefone|phone|celular|whatsapp)/.test(f.label.toLowerCase())
+  );
+}
+
+/** Telefone normalizado (só dígitos, sem DDI 55 nem zero à esquerda); "" se < 8 dígitos. */
+function phoneKeyOf(a: Attendee): string {
+  let d = (phoneFieldOf(a)?.value ?? "").replace(/\D/g, "");
+  if (d.length > 11 && d.startsWith("55")) d = d.slice(2);
+  d = d.replace(/^0+/, "");
+  return d.length >= 8 ? d : "";
+}
+
+/** Grupos com mesmo telefone e e-mails diferentes (cada grupo ordenado por inscrição). */
+function duplicateGroups(all: Attendee[]): Attendee[][] {
+  const byPhone = new Map<string, Attendee[]>();
+  for (const a of all) {
+    const k = phoneKeyOf(a);
+    if (k) byPhone.set(k, [...(byPhone.get(k) ?? []), a]);
+  }
+  const groups: Attendee[][] = [];
+  for (const list of byPhone.values()) {
+    const emails = new Set(list.map((a) => a.email.trim().toLowerCase()).filter(Boolean));
+    if (list.length > 1 && emails.size > 1) {
+      groups.push([...list].sort((x, y) => attendeeSignupAt(x).localeCompare(attendeeSignupAt(y))));
+    }
+  }
+  return groups;
+}
+
+/** Painel de revisão: lista cada grupo e deixa remover a versão errada (1 clique). */
+function DuplicatesModal({ eventId, onClose }: { eventId: string; onClose: () => void }) {
+  const db = useDb();
+  const toast = useToast();
+  const all = attendeesOf(db, eventId).filter((a) => a.status !== "cancelado");
+  const groups = duplicateGroups(all);
+
+  return (
+    <Modal
+      title="Possíveis duplicados"
+      onClose={onClose}
+      width={640}
+      footer={<button className="btn" onClick={onClose}>Fechar</button>}
+    >
+      <p style={{ fontSize: 13, color: "var(--dim)", marginTop: 0, marginBottom: 16, lineHeight: 1.6 }}>
+        Mesma pessoa (telefone igual) inscrita mais de uma vez com <b>e-mail ou nome diferente</b> —
+        normalmente erro de digitação no formulário. Confira e remova a versão errada; mantenha a do
+        e-mail correto.
+      </p>
+      {groups.length === 0 ? (
+        <Empty icon="check" title="Tudo resolvido" sub="Nenhum possível duplicado neste evento." />
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {groups.map((group) => (
+            <div
+              key={phoneKeyOf(group[0])}
+              style={{ border: "1px solid var(--line)", borderRadius: 12, overflow: "hidden" }}
+            >
+              <div
+                style={{
+                  padding: "8px 12px",
+                  background: "rgba(255,255,255,.03)",
+                  fontSize: 12,
+                  color: "var(--dim)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                <Icon name="users" size={14} /> Telefone {phoneFieldOf(group[0])?.value} ·{" "}
+                {group.length} inscritos
+              </div>
+              {group.map((a) => (
+                <div
+                  key={a.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    padding: "10px 12px",
+                    borderTop: "1px solid var(--line)",
+                  }}
+                >
+                  <Avatar initials={initialsOf(a.name)} />
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontWeight: 700, fontSize: 13.5 }}>{a.name}</div>
+                    <div style={{ fontSize: 12.5, color: "var(--dim)" }}>{a.email}</div>
+                  </div>
+                  <span style={{ fontSize: 12, color: "var(--dim)", flexShrink: 0 }}>
+                    {fmtDateTime(attendeeSignupAt(a))}
+                  </span>
+                  <button
+                    className="btn"
+                    style={{ color: "var(--red)", borderColor: "var(--red)", flexShrink: 0 }}
+                    onClick={() => {
+                      removeAttendee(a.id);
+                      toast(`${a.name} removido`);
+                    }}
+                  >
+                    <Icon name="trash" size={14} /> Remover
+                  </button>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 function AttendeeFormModal({ eventId, onClose }: { eventId: string; onClose: () => void }) {
   const toast = useToast();
   const [form, setForm] = useState({
@@ -424,6 +544,7 @@ export function Inscritos() {
   const [importing, setImporting] = useState(false);
   const [leadOpen, setLeadOpen] = useState<Attendee | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [dupOpen, setDupOpen] = useState(false);
   // Valores selecionados por faceta (vazio = todas); transitório (não persiste).
   const [facetVal, setFacetVal] = useState<Record<string, string[]>>({});
 
@@ -450,6 +571,7 @@ export function Inscritos() {
   const all = ev ? attendeesOf(db, ev.id).filter((a) => a.status !== "cancelado") : [];
   const leadColumnCount = leadColumnsOf(all).length;
   const ticketTones = ticketToneMap(all);
+  const dupeGroups = duplicateGroups(all);
 
   const countOf = (id: string) =>
     id === "todos" ? all.length : all.filter((a) => a.status === id).length;
@@ -642,6 +764,34 @@ export function Inscritos() {
         </div>
       )}
 
+      {dupeGroups.length > 0 && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            marginBottom: 14,
+            padding: "10px 14px",
+            borderRadius: 12,
+            background: "#B4530914",
+            border: "1px solid #B4530955",
+          }}
+        >
+          <span style={{ flexShrink: 0, color: "#D97706", display: "inline-flex" }}>
+            <Icon name="users" size={17} />
+          </span>
+          <span style={{ flex: 1, fontSize: 13, lineHeight: 1.5 }}>
+            <b>
+              {dupeGroups.length} {dupeGroups.length === 1 ? "possível duplicado" : "possíveis duplicados"}
+            </b>{" "}
+            — mesma pessoa inscrita com e-mail diferente (telefone igual).
+          </span>
+          <button className="btn btn-dark" style={{ flexShrink: 0 }} onClick={() => setDupOpen(true)}>
+            Revisar
+          </button>
+        </div>
+      )}
+
       <div className="tbl-wrap">
         <table className="tbl">
           <thead>
@@ -722,6 +872,7 @@ export function Inscritos() {
       {leadOpen && (
         <LeadFieldsModal attendee={leadOpen} columns={leadColumnsOf(all)} onClose={() => setLeadOpen(null)} />
       )}
+      {dupOpen && <DuplicatesModal eventId={ev.id} onClose={() => setDupOpen(false)} />}
       {confirmClear && (
         <ConfirmDialog
           tone="danger"

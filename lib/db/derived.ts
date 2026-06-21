@@ -683,6 +683,96 @@ export function leadBreakdown(
     .slice(0, limit);
 }
 
+export type LeadSegmentInsight = { text: string; tone: Tone };
+
+/**
+ * Análise completa de UM atributo de lead — não só a distribuição, mas a leitura
+ * dela: quem lidera e por quanto, o quão concentrado é o público (top 3),
+ * quantas categorias existem, qual a cauda fora do top e a cobertura do dado
+ * (quantos leads informaram esse campo). É o que torna a "Inteligência de leads"
+ * viva: insights estruturais que valem para QUALQUER atributo (Cargo, UTM, Frota…),
+ * sem hardcode de valores. Puro — calculado dos inscritos, nunca armazenado.
+ */
+export type LeadSegmentAnalysis = {
+  key: string;
+  label: string;
+  total: number;        // leads que informaram o atributo
+  coverage: number;     // % dos leads (não-cancelados) que preencheram o campo
+  distinct: number;     // nº de valores distintos no total
+  rows: LeadBreakdownRow[]; // top `limit` valores (maior primeiro)
+  leader: LeadBreakdownRow | null;
+  runnerUp: LeadBreakdownRow | null;
+  leadGap: number;      // pontos percentuais do líder sobre o 2º
+  top3Share: number;    // % dos leads concentrados nos 3 maiores valores
+  maxCount: number;     // contagem do líder (base das barras)
+  tailCount: number;    // valores distintos fora do top mostrado
+  tailLeads: number;    // leads somados nesses valores da cauda
+  tailPct: number;
+  concentration: "concentrado" | "equilibrado" | "pulverizado";
+  insights: LeadSegmentInsight[];
+};
+
+export function leadSegmentAnalysis(
+  s: DbState,
+  eventId: string,
+  fieldKey: string,
+  label: string,
+  limit = 6
+): LeadSegmentAnalysis {
+  const leads = leadsOf(s, eventId);
+  const counts = new Map<string, number>();
+  let total = 0;
+  for (const a of leads) {
+    const f = (a.lead_fields ?? []).find((x) => x.key === fieldKey && x.value);
+    if (!f) continue;
+    counts.set(f.value, (counts.get(f.value) ?? 0) + 1);
+    total++;
+  }
+  const sorted = [...counts]
+    .map(([value, count]) => ({ value, count, pct: total ? Math.round((count / total) * 100) : 0 }))
+    .sort((a, b) => b.count - a.count);
+
+  const rows = sorted.slice(0, limit);
+  const distinct = sorted.length;
+  const leader = sorted[0] ?? null;
+  const runnerUp = sorted[1] ?? null;
+  const leadGap = leader && runnerUp ? leader.pct - runnerUp.pct : 0;
+  const top3Leads = sorted.slice(0, 3).reduce((sum, r) => sum + r.count, 0);
+  const top3Share = total ? Math.round((top3Leads / total) * 100) : 0;
+  const shownLeads = rows.reduce((sum, r) => sum + r.count, 0);
+  const tailLeads = total - shownLeads;
+  const tailCount = distinct - rows.length;
+  const tailPct = total ? Math.round((tailLeads / total) * 100) : 0;
+  const coverage = leads.length ? Math.round((total / leads.length) * 100) : 0;
+  const concentration =
+    top3Share >= 70 ? "concentrado" : top3Share >= 45 ? "equilibrado" : "pulverizado";
+
+  const noun = label.toLowerCase();
+  const insights: LeadSegmentInsight[] = [];
+  if (leader) {
+    insights.push({
+      tone: "green",
+      text:
+        `${leader.value} lidera com ${leader.pct}%` +
+        (runnerUp && leadGap > 0 ? ` — ${leadGap} ponto${leadGap === 1 ? "" : "s"} à frente do 2º` : ""),
+    });
+  }
+  if (concentration === "concentrado" && distinct > 3) {
+    insights.push({ tone: "blue", text: `Público concentrado: os 3 maiores somam ${top3Share}% dos leads` });
+  } else if (concentration === "pulverizado") {
+    insights.push({ tone: "amber", text: `Público pulverizado em ${distinct} valores de ${noun}` });
+  }
+  if (coverage > 0 && coverage < 60) {
+    insights.push({ tone: "amber", text: `Só ${coverage}% dos leads informaram ${noun}` });
+  }
+
+  return {
+    key: fieldKey, label, total, coverage, distinct, rows, leader, runnerUp,
+    leadGap, top3Share, maxCount: leader?.count ?? 0, tailCount, tailLeads, tailPct,
+    concentration, insights,
+  };
+}
+
 /* ---------- Destaques dinâmicos (KPIs mais úteis agora) ---------- */
 
 export type Highlight = {
