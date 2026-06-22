@@ -6,6 +6,7 @@
 import { type SupabaseClient } from "@supabase/supabase-js";
 import { seedState } from "@/lib/db/seed";
 import { seedWorkspace } from "@/lib/db/seed-supabase";
+import { TRIAL_DAYS } from "@/lib/billing/entitlement";
 
 export async function provisionWorkspace(
   admin: SupabaseClient,
@@ -36,5 +37,20 @@ export async function provisionWorkspace(
 
   const seedRes = await seedWorkspace(admin, workspaceId, userId, name, email);
   if (seedRes.error) return seedRes;
+
+  // Inicia o período de teste (7 dias). O paywall (app/(app)/layout.tsx) libera
+  // enquanto `trialing` e dentro do prazo; ao expirar, manda para /planos.
+  const trialEnd = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
+  const { error: subErr } = await admin.from("subscriptions").upsert(
+    {
+      workspace_id: workspaceId,
+      plan: "trial",
+      status: "trialing",
+      current_period_end: trialEnd.toISOString(),
+    } as never,
+    { onConflict: "workspace_id" }
+  );
+  if (subErr) return { error: `subscription trial: ${subErr.message}` };
+
   return { error: null, workspaceId };
 }

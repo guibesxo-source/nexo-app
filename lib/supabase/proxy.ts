@@ -4,7 +4,8 @@ import { NextResponse, type NextRequest } from "next/server";
 // Refresh da sessão Supabase (cookies) + guarda de rotas da área logada.
 // Rodado pelo proxy.ts da raiz. Sem sessão → manda pro /login.
 
-// Rotas do route group (app) — exigem usuário autenticado.
+// Rotas que exigem usuário autenticado. `/planos` exige login mas NÃO assinatura
+// (fica fora do grupo (app), então não passa pelo gate de paywall do layout).
 const PROTECTED = [
   "/welcome",
   "/dashboard",
@@ -15,6 +16,7 @@ const PROTECTED = [
   "/membros",
   "/integracoes",
   "/config",
+  "/planos",
 ];
 
 export async function updateSession(request: NextRequest) {

@@ -32,6 +32,7 @@ import { getState } from "@/lib/db/store";
 import { createClient } from "@/lib/supabase/client";
 import { useLiveAttendees } from "@/components/app/use-live-attendees";
 import { useLiveSympla } from "@/components/app/use-live-sympla";
+import { TrialBanner } from "@/components/app/trial-banner";
 import { displayNameFromUser } from "@/lib/auth";
 import { fmtDateShort, initialsOf, relTime } from "@/lib/format";
 
@@ -674,6 +675,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             onToggleCollapse={() => setSidebarCollapsed(!collapsed)}
           />
           <div className="main">
+            <TrialBanner />
             <Topbar
               crumb={CRUMBS[route]}
               onMenu={() => setMenuOpen((o) => !o)}

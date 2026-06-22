@@ -9,6 +9,15 @@ import { login } from "@/lib/db";
 
 type Mode = "login" | "signup";
 
+// Destino pós-auth quando o usuário veio do site escolhendo um plano
+// (?next=/planos?cycle=...). Só aceita caminho interno (anti open-redirect).
+function safeNext(): string | null {
+  if (typeof window === "undefined") return null;
+  const n = new URLSearchParams(window.location.search).get("next");
+  if (!n || !n.startsWith("/") || n.startsWith("//")) return null;
+  return n;
+}
+
 function AuthForm() {
   const [mode, setMode] = useState<Mode>("login");
   const [name, setName] = useState("");
@@ -61,12 +70,14 @@ function AuthForm() {
       // Navegação "hard" de propósito: com router.replace (transição client) o
       // proxy do Next pode rodar antes do cookie de sessão propagar e devolver
       // pro /login. window.location força uma requisição nova já autenticada.
+      const next = safeNext();
       if (mode === "signup") {
-        // confirma a criação e leva à tela de boas-vindas dentro do app
+        // confirma a criação e leva ao destino (planos, se veio do site) ou às boas-vindas
         setCreated(true);
-        setTimeout(() => window.location.replace("/welcome"), 1600);
+        const dest = next ?? "/welcome";
+        setTimeout(() => window.location.replace(dest), 1600);
       } else {
-        window.location.replace("/dashboard");
+        window.location.replace(next ?? "/dashboard");
       }
     } catch {
       setError("Falha de conexão — tente de novo.");
@@ -196,7 +207,7 @@ export default function LoginPage() {
     let active = true;
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!active) return;
-      if (user) window.location.replace("/dashboard");
+      if (user) window.location.replace(safeNext() ?? "/dashboard");
       else setChecking(false);
     });
     return () => { active = false; };
