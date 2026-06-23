@@ -81,12 +81,12 @@ export default function SiteHome() {
             className="reveal mt-9 flex flex-wrap items-center justify-center gap-3"
             style={{ animationDelay: "0.18s" }}
           >
-            <Link
-              href="/login"
+            <a
+              href="#precos"
               className="inline-flex items-center gap-2 rounded-sm bg-green px-5 py-3 text-sm font-bold text-black transition hover:bg-green-deep"
             >
-              Começar grátis <ArrowRight className="h-4 w-4" />
-            </Link>
+              Ver planos <ArrowRight className="h-4 w-4" />
+            </a>
             <a
               href="#como-funciona"
               className="inline-flex items-center gap-2 rounded-sm border border-white/20 px-5 py-3 text-sm font-bold text-white transition hover:border-white/50"

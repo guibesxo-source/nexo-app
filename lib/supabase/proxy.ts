@@ -51,7 +51,9 @@ export async function updateSession(request: NextRequest) {
 
   if (!user && isProtected) {
     const url = request.nextUrl.clone();
+    const dest = path + request.nextUrl.search; // ex.: /planos?cycle=anual
     url.pathname = "/login";
+    url.search = `?next=${encodeURIComponent(dest)}`;
     return NextResponse.redirect(url);
   }
 

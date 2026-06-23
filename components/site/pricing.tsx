@@ -10,7 +10,9 @@ import { FOUNDER_PLAN, type Cycle } from "@/lib/billing/plan";
 export function SitePricing() {
   const [cycle, setCycle] = useState<Cycle>("anual");
   const c = FOUNDER_PLAN.cycles[cycle];
-  const href = `/login?next=${encodeURIComponent(`/planos?cycle=${cycle}`)}`;
+  // Vai direto pra página de pagamento (logado → pagamento; deslogado → cria a
+  // conta e o proxy devolve aqui via ?next).
+  const href = `/planos?cycle=${cycle}`;
 
   return (
     <div className="mx-auto mt-10 max-w-md rounded-xl border border-black/10 bg-white p-8 shadow-[var(--shadow-md)]">
@@ -67,10 +69,10 @@ export function SitePricing() {
         href={href}
         className="mt-5 flex w-full items-center justify-center gap-2 rounded-sm bg-green px-4 py-3 text-sm font-bold text-black transition hover:bg-green-deep"
       >
-        Começar grátis <ArrowRight className="h-4 w-4" />
+        Quero ser fundador <ArrowRight className="h-4 w-4" />
       </Link>
       <p className="mt-3 text-center text-[11.5px] text-faint">
-        7 dias grátis · {FOUNDER_PLAN.tagline}
+        7 dias grátis para testar · {FOUNDER_PLAN.tagline}
       </p>
     </div>
   );

@@ -10,6 +10,14 @@
   color: #0a0a0a;
 }
 
+/* Rolagem suave nas âncoras (#precos, #como-funciona…) com folga pra nav fixa. */
+html:has(.site) {
+  scroll-behavior: smooth;
+}
+.site section[id] {
+  scroll-margin-top: 84px;
+}
+
 /* Assinatura da marca: palavra dentro de uma pill verde levemente torta. */
 .mark-pill {
   background: #00e47c;
