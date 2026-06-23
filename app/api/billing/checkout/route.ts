@@ -5,15 +5,19 @@ import { createPixCheckout, createCardSubscription } from "@/lib/integrations/ab
 
 export const runtime = "nodejs";
 
-// Mapa ciclo:método → env do produto na AbacatePay + como cobrar.
+// Mapa ciclo:método → ID do produto na AbacatePay + como cobrar.
 //   anual:pix   → produto one-time PIX (libera 365 dias)
 //   anual:card  → assinatura ANNUALLY no cartão
 //   mensal:card → assinatura MONTHLY no cartão
 // mensal:pix não existe (PIX não auto-renova — não faz sentido mensal).
-const PRODUCTS: Record<string, { env: string; kind: "pix" | "card" }> = {
-  "anual:pix": { env: "ABACATE_FOUNDER_ANNUAL_PIX_PRODUCT_ID", kind: "pix" },
-  "anual:card": { env: "ABACATE_FOUNDER_ANNUAL_CARD_PRODUCT_ID", kind: "card" },
-  "mensal:card": { env: "ABACATE_FOUNDER_MONTHLY_CARD_PRODUCT_ID", kind: "card" },
+//
+// Os IDs ("Id do Produto" cadastrado na Abacate) NÃO são segredo e ficam fixos
+// aqui de propósito: evita erro de env (valor trocado/escondido). Ao criar os
+// produtos na conta de PRODUÇÃO, use os MESMOS slugs.
+const PRODUCTS: Record<string, { productId: string; kind: "pix" | "card" }> = {
+  "anual:pix": { productId: "founder-annual-pix", kind: "pix" },
+  "anual:card": { productId: "founder-annual-card", kind: "card" },
+  "mensal:card": { productId: "founder-monthly-card", kind: "card" },
 };
 
 // Cria o checkout do plano Fundador para o workspace do usuário logado e devolve
@@ -39,13 +43,7 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
-  const productId = process.env[product.env];
-  if (!productId) {
-    return NextResponse.json(
-      { error: "Plano indisponível no momento. Tente o outro método/ciclo." },
-      { status: 503 }
-    );
-  }
+  const productId = product.productId;
 
   const { data: mem } = await supabase
     .from("memberships")
