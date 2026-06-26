@@ -23,7 +23,7 @@ import {
 } from "@/lib/db";
 import { attendeeSchema } from "@/lib/validations/attendee";
 import { downloadCsv, toCsv } from "@/lib/csv";
-import { fmtDateTime, initialsOf } from "@/lib/format";
+import { fmtDateShort, fmtDateTime, initialsOf } from "@/lib/format";
 import type { Attendee, AttendeeStatus, TicketType } from "@/types";
 
 const TABS: [string, string][] = [
@@ -62,6 +62,12 @@ function leadValue(a: Attendee, key: string) {
 
 function leadSearchText(a: Attendee) {
   return leadFieldsOf(a).map((field) => `${field.label} ${field.value}`).join(" ");
+}
+
+/** ms da data de inscrição (mesma fonte da coluna "Inscrição"); NaN se o
+   inscrito não tem data utilizável — esses não entram em nenhum filtro por dia. */
+function signupMsOf(a: Attendee): number {
+  return new Date(attendeeSignupAt(a)).getTime();
 }
 
 /* Detector de "duplicados aproximados": a mesma pessoa que se inscreveu mais de
@@ -515,6 +521,93 @@ function FacetMultiSelect({ label, options, selected, onChange }: {
   );
 }
 
+/* ---- Filtro por data de inscrição ----
+   Responde direto à pergunta de Growth: "quantos inscritos vieram na data X"
+   (ex.: medir um disparo de WhatsApp num dia). Combina com os filtros de UTM
+   acima — a contagem da lista já reflete origem + data. Datas-only no fuso
+   local; estado transitório (não persiste). */
+
+/** "YYYY-MM-DD" local de uma data (formato do <input type="date">). */
+function localDateInput(d: Date): string {
+  return [
+    d.getFullYear(),
+    String(d.getMonth() + 1).padStart(2, "0"),
+    String(d.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+function shiftDays(base: Date, days: number): Date {
+  const d = new Date(base);
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
+/** Atalhos de período (a janela mais comum pra Growth medir disparo). */
+const DATE_PRESETS: { id: string; label: string; range: () => [string, string] }[] = [
+  { id: "hoje", label: "Hoje", range: () => { const t = localDateInput(new Date()); return [t, t]; } },
+  { id: "ontem", label: "Ontem", range: () => { const y = localDateInput(shiftDays(new Date(), -1)); return [y, y]; } },
+  { id: "7d", label: "7 dias", range: () => [localDateInput(shiftDays(new Date(), -6)), localDateInput(new Date())] },
+  { id: "30d", label: "30 dias", range: () => [localDateInput(shiftDays(new Date(), -29)), localDateInput(new Date())] },
+];
+
+/** Frase legível da janela de datas selecionada (vazia se sem filtro). */
+function dateRangeSummary(from: string, to: string): string {
+  if (from && to) return from === to ? `em ${fmtDateShort(from)}` : `entre ${fmtDateShort(from)} e ${fmtDateShort(to)}`;
+  if (from) return `a partir de ${fmtDateShort(from)}`;
+  if (to) return `até ${fmtDateShort(to)}`;
+  return "";
+}
+
+function SignupDateFilter({ from, to, onChange }: {
+  from: string; to: string; onChange: (from: string, to: string) => void;
+}) {
+  const active = !!(from || to);
+  const activePreset = DATE_PRESETS.find((p) => {
+    const [f, t] = p.range();
+    return f === from && t === to;
+  })?.id;
+
+  return (
+    <div className={"facet-field date-facet" + (active ? " active" : "")}>
+      <span className="facet-field-label">Inscrição (data)</span>
+      <div className="date-facet-row">
+        <input
+          type="date"
+          className="date-facet-input"
+          value={from}
+          max={to || undefined}
+          onChange={(e) => onChange(e.target.value, to)}
+          aria-label="Data inicial da inscrição"
+        />
+        <span className="date-facet-sep">até</span>
+        <input
+          type="date"
+          className="date-facet-input"
+          value={to}
+          min={from || undefined}
+          onChange={(e) => onChange(from, e.target.value)}
+          aria-label="Data final da inscrição"
+        />
+        <span className="date-facet-presets">
+          {DATE_PRESETS.map((p) => (
+            <button
+              type="button"
+              key={p.id}
+              className={"date-facet-preset" + (activePreset === p.id ? " on" : "")}
+              onClick={() => {
+                if (activePreset === p.id) onChange("", "");
+                else { const [f, t] = p.range(); onChange(f, t); }
+              }}
+            >
+              {p.label}
+            </button>
+          ))}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 /* Cores distintas por tipo de ingresso (estáveis por evento, sem colisão):
    "Geral" fica cinza; os demais tipos entram num rodízio de cores fortes na
    ordem alfabética — assim Participante e Field Sales nunca ficam iguais. */
@@ -547,6 +640,9 @@ export function Inscritos() {
   const [dupOpen, setDupOpen] = useState(false);
   // Valores selecionados por faceta (vazio = todas); transitório (não persiste).
   const [facetVal, setFacetVal] = useState<Record<string, string[]>>({});
+  // Janela de datas de inscrição (vazio = sem limite); transitório.
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
 
   useEffect(() => {
     const onSearch = (e: Event) => {
@@ -572,6 +668,12 @@ export function Inscritos() {
   const leadColumnCount = leadColumnsOf(all).length;
   const ticketTones = ticketToneMap(all);
   const dupeGroups = duplicateGroups(all);
+  // Dispensa do aviso de duplicados: presa à "assinatura" do conjunto atual
+  // (os telefones em conflito). Fica fechado entre sessões, mas volta sozinho
+  // se surgir um possível duplicado novo.
+  const dupSig = dupeGroups.map((g) => phoneKeyOf(g[0])).sort().join(",");
+  const dupDismissKey = `insc.dup-dismissed:${ev?.id ?? ""}:${dupSig}`;
+  const dupDismissed = db.settings.toggles[dupDismissKey] ?? false;
 
   const countOf = (id: string) =>
     id === "todos" ? all.length : all.filter((a) => a.status === id).length;
@@ -579,21 +681,50 @@ export function Inscritos() {
   const facets = buildFacets(all);
   const visibleFacets = facets.filter((f) => db.settings.toggles[f.toggleKey] ?? f.defaultOn);
   const activeFacetCount = visibleFacets.filter((f) => (facetVal[f.key]?.length ?? 0) > 0).length;
+  const dateActive = !!(dateFrom || dateTo);
+  const fromMs = dateFrom ? new Date(`${dateFrom}T00:00:00`).getTime() : null;
+  const toMs = dateTo ? new Date(`${dateTo}T23:59:59.999`).getTime() : null;
   const facetOptions = (f: FacetDef) =>
     [...new Set(all.map(f.value).filter(Boolean))].sort((x, y) => x.localeCompare(y, "pt-BR"));
   const toggleFacet = (key: string, on: boolean) => {
     setToggle(`insc.facet.${key}`, on);
     if (!on) setFacetVal((v) => ({ ...v, [key]: [] }));
   };
+  const clearAllFilters = () => {
+    setFacetVal({});
+    setDateFrom("");
+    setDateTo("");
+  };
 
-  const rows = all
+  // Inscritos que batem em busca + abas + facetas (UTM etc.), AINDA sem o
+  // recorte de data — é a base com que a janela de datas é reconciliada.
+  const facetRows = all
     .filter((a) => tab === "todos" || a.status === tab)
     .filter((a) => !q || (a.name + a.email + a.company + leadSearchText(a)).toLowerCase().includes(q.toLowerCase()))
     .filter((a) => visibleFacets.every((f) => {
       const sel = facetVal[f.key];
       return !sel || sel.length === 0 || sel.includes(f.value(a));
-    }))
+    }));
+
+  const rows = facetRows
+    .filter((a) => {
+      if (!dateActive) return true;
+      const t = signupMsOf(a);
+      if (Number.isNaN(t)) return false;
+      return (fromMs == null || t >= fromMs) && (toMs == null || t <= toMs);
+    })
     .sort((a, b) => attendeeSignupAt(b).localeCompare(attendeeSignupAt(a)));
+
+  // Reconciliação da janela de datas: dos que batem nos filtros, quantos
+  // ficaram fora do período e quantos não têm data utilizável. Garante que
+  // a conta sempre feche — rows + fora do período + sem data = facetRows —
+  // explicando casos como "filtro puxa 38, mas dia a dia só 30".
+  const undatedCount = dateActive ? facetRows.filter((a) => Number.isNaN(signupMsOf(a))).length : 0;
+  const outsideCount = dateActive ? facetRows.length - rows.length - undatedCount : 0;
+
+  const activeFacetSummary = visibleFacets
+    .filter((f) => (facetVal[f.key]?.length ?? 0) > 0)
+    .map((f) => `${f.label}: ${facetVal[f.key]!.join(", ")}`);
 
   const exportCsv = () => {
     const leadCols = leadColumnsOf(rows);
@@ -744,27 +875,59 @@ export function Inscritos() {
         ))}
       </div>
 
-      {visibleFacets.length > 0 && (
-        <div className="facet-bar">
-          {visibleFacets.map((f) => (
-            <FacetMultiSelect
-              key={f.key}
-              label={f.label}
-              options={facetOptions(f)}
-              selected={facetVal[f.key] ?? []}
-              onChange={(next) => setFacetVal((v) => ({ ...v, [f.key]: next }))}
-            />
-          ))}
-          {activeFacetCount > 0 && (
-            <button className="facet-clear-all" onClick={() => setFacetVal({})}>
-              <Icon name="x" size={13} />
-              Limpar {activeFacetCount} filtro{activeFacetCount === 1 ? "" : "s"}
-            </button>
+      <div className="facet-bar">
+        <SignupDateFilter
+          from={dateFrom}
+          to={dateTo}
+          onChange={(f, t) => { setDateFrom(f); setDateTo(t); }}
+        />
+        {visibleFacets.map((f) => (
+          <FacetMultiSelect
+            key={f.key}
+            label={f.label}
+            options={facetOptions(f)}
+            selected={facetVal[f.key] ?? []}
+            onChange={(next) => setFacetVal((v) => ({ ...v, [f.key]: next }))}
+          />
+        ))}
+        {activeFacetCount > 0 && (
+          <button className="facet-clear-all" onClick={() => setFacetVal({})}>
+            <Icon name="x" size={13} />
+            Limpar {activeFacetCount} filtro{activeFacetCount === 1 ? "" : "s"}
+          </button>
+        )}
+        {dateActive && (
+          <button className="facet-clear-all" onClick={() => { setDateFrom(""); setDateTo(""); }}>
+            <Icon name="x" size={13} />
+            Limpar data
+          </button>
+        )}
+      </div>
+
+      {(dateActive || activeFacetCount > 0) && (
+        <div className="insc-result">
+          <span className="insc-result-txt">
+            <Icon name="users" size={17} />
+            <b>{rows.length}</b> {rows.length === 1 ? "inscrito" : "inscritos"}
+            {dateActive && <> · {dateRangeSummary(dateFrom, dateTo)}</>}
+            {activeFacetSummary.map((s) => (
+              <span className="insc-result-tag" key={s}>{s}</span>
+            ))}
+          </span>
+          {dateActive && (outsideCount > 0 || undatedCount > 0) && (
+            <span
+              className="insc-result-note"
+              title="Inscritos que batem nos filtros mas não na janela de datas — vieram em outras datas ou não têm data de inscrição registrada."
+            >
+              de <b>{facetRows.length}</b> que batem no filtro
+              {outsideCount > 0 && <> · {outsideCount} em outras datas</>}
+              {undatedCount > 0 && <> · {undatedCount} sem data de inscrição</>}
+            </span>
           )}
         </div>
       )}
 
-      {dupeGroups.length > 0 && (
+      {dupeGroups.length > 0 && !dupDismissed && (
         <div
           style={{
             display: "flex",
@@ -788,6 +951,14 @@ export function Inscritos() {
           </span>
           <button className="btn btn-dark" style={{ flexShrink: 0 }} onClick={() => setDupOpen(true)}>
             Revisar
+          </button>
+          <button
+            className="dup-dismiss"
+            aria-label="Fechar aviso de duplicados"
+            title="Fechar — volta se surgir um novo possível duplicado"
+            onClick={() => setToggle(dupDismissKey, true)}
+          >
+            <Icon name="x" size={16} />
           </button>
         </div>
       )}
@@ -890,7 +1061,7 @@ export function Inscritos() {
           onConfirm={() => {
             const n = removeAllAttendees(ev.id);
             setConfirmClear(false);
-            setFacetVal({});
+            clearAllFilters();
             toast(`${n} inscrito${n === 1 ? "" : "s"} apagado${n === 1 ? "" : "s"}`);
           }}
         />

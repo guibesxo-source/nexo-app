@@ -2676,3 +2676,54 @@ select.input { appearance: none; background-image: linear-gradient(45deg, transp
   transition: color 0.15s var(--ease), border-color 0.15s var(--ease);
 }
 .facet-clear-all:hover { color: var(--red); border-color: var(--red); }
+
+/* Filtro por data de inscrição (Growth: "quantos vieram na data X") — ocupa a
+   linha toda da faceta, com De/Até e atalhos de período. */
+.date-facet { max-width: none; }
+.date-facet-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.date-facet-input {
+  background: var(--white); border: 1px solid var(--line); border-radius: var(--r-sm);
+  padding: 9px 11px; font-size: 13px; font-weight: 500; color: var(--text);
+  font-family: inherit; cursor: pointer; transition: border-color 0.15s var(--ease);
+}
+.date-facet-input:hover { border-color: var(--line-strong); }
+.date-facet-input:focus { outline: none; border-color: var(--black); }
+.date-facet.active .date-facet-input { border-color: var(--green-deep); }
+.date-facet-sep { font-size: 12px; color: var(--dim); }
+.date-facet-presets { display: inline-flex; gap: 6px; margin-left: 4px; flex-wrap: wrap; }
+.date-facet-preset {
+  border: 1px solid var(--line); background: var(--white); border-radius: 99px;
+  padding: 7px 13px; font-size: 12px; font-weight: 600; color: var(--dim);
+  cursor: pointer; transition: all 0.15s var(--ease);
+}
+.date-facet-preset:hover { border-color: var(--line-strong); color: var(--text); }
+.date-facet-preset.on { background: var(--green-deep); border-color: var(--green-deep); color: var(--black); }
+
+/* Resposta direta de "quantos vieram": contagem viva + contexto (data + UTM). */
+.insc-result {
+  display: flex; align-items: center; gap: 11px; flex-wrap: wrap;
+  margin-bottom: 14px; padding: 12px 16px; border-radius: var(--r-md);
+  background: var(--green-soft); border: 1px solid var(--green-deep);
+}
+.insc-result-txt {
+  font-size: 13.5px; color: var(--text);
+  display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.insc-result-txt > svg { color: var(--green-deep); flex-shrink: 0; }
+.insc-result-txt b { font-size: 17px; font-weight: 800; }
+.insc-result-tag {
+  display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 99px;
+  background: var(--white); border: 1px solid var(--line); font-size: 12px; font-weight: 600;
+}
+/* Linha de reconciliação: explica o resto que não entrou na janela de datas. */
+.insc-result-note { flex-basis: 100%; font-size: 12.5px; color: var(--dim); cursor: help; }
+.insc-result-note b { font-weight: 700; color: var(--text); }
+
+/* Fechar o aviso de "possíveis duplicados" (botão X discreto no fim da faixa). */
+.dup-dismiss {
+  flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; padding: 0; border: 0; border-radius: 8px;
+  background: transparent; color: #B45309; cursor: pointer;
+  transition: background 0.15s var(--ease), color 0.15s var(--ease);
+}
+.dup-dismiss:hover { background: #B4530914; color: #92400E; }
