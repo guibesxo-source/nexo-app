@@ -12,6 +12,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { SitePricing } from "@/components/site/pricing";
+import { HeroFX } from "@/components/site/hero-fx";
+import { HeroOrbits, TypewriterHeading } from "@/components/site/hero-orbit";
 
 const dores: { icon: LucideIcon; dor: string; consequencia: string }[] = [
   { icon: Clock, dor: "Horas consolidando informação de várias ferramentas", consequencia: "Tempo que não vira entrega." },
@@ -47,9 +49,9 @@ const comparativo = [
 ];
 
 const marqueeItems = [
-  "Vagas de fundador limitadas",
-  "Preço travado para sempre",
-  "7 dias grátis, sem cartão",
+  "Beta aberto — grátis por tempo indeterminado",
+  "Sem cartão de crédito",
+  "Construído com o feedback de quem usa",
   "Substitui 6+ ferramentas",
   "Financeiro nativo por evento",
   "Tempo real para o time",
@@ -60,102 +62,53 @@ export default function SiteHome() {
     <>
       {/* 1 · HERO */}
       <section className="hero">
-        <div className="mx-auto max-w-[var(--site-max)] px-6 pb-20 pt-20 text-center sm:pt-28">
-          <span className="eyebrow reveal text-green">Back-office do evento</span>
+        <HeroFX />
+        <div className="mx-auto grid max-w-[var(--site-max)] items-center gap-12 px-6 pb-16 pt-16 sm:pt-24 lg:grid-cols-2 lg:gap-6">
+          {/* coluna esquerda — copy */}
+          <div className="text-center lg:text-left">
+            <div className="reveal flex flex-wrap items-center justify-center gap-3 lg:justify-start">
+              <span className="eyebrow text-green">Back-office do evento</span>
+              <span className="hero-free">R$ 0 — grátis por tempo indeterminado</span>
+            </div>
 
-          <h1
-            className="reveal mx-auto mt-6 max-w-[16ch] text-[clamp(40px,7vw,72px)] font-extrabold leading-[1.04] tracking-[-0.035em]"
-            style={{ animationDelay: "0.05s" }}
-          >
-            O <span className="mark-pill">hub</span> que faz os seus eventos acontecerem.
-          </h1>
+            <TypewriterHeading />
 
-          <p
-            className="reveal mx-auto mt-6 max-w-[52ch] text-[17px] leading-relaxed text-white/65"
-            style={{ animationDelay: "0.12s" }}
-          >
-            Inscritos, checklist e financeiro do seu evento num só lugar — em tempo real, sem planilha.
-          </p>
-
-          <div
-            className="reveal mt-9 flex flex-wrap items-center justify-center gap-3"
-            style={{ animationDelay: "0.18s" }}
-          >
-            <a
-              href="#precos"
-              className="inline-flex items-center gap-2 rounded-sm bg-green px-5 py-3 text-sm font-bold text-black transition hover:bg-green-deep"
+            <p
+              className="reveal mx-auto mt-6 max-w-[46ch] text-[17px] leading-relaxed text-white/65 lg:mx-0"
+              style={{ animationDelay: "0.12s" }}
             >
-              Ver planos <ArrowRight className="h-4 w-4" />
-            </a>
-            <a
-              href="#como-funciona"
-              className="inline-flex items-center gap-2 rounded-sm border border-white/20 px-5 py-3 text-sm font-bold text-white transition hover:border-white/50"
+              Inscritos, checklist e financeiro do seu evento num só lugar — em tempo real, sem
+              planilha.
+            </p>
+
+            <div
+              className="reveal mt-10 flex flex-wrap items-center justify-center gap-4 lg:justify-start"
+              style={{ animationDelay: "1.9s" }}
             >
-              Ver como funciona
-            </a>
+              <span className="btn-spin">
+                <Link
+                  href="/login"
+                  className="inline-flex items-center gap-2 rounded-full bg-green px-6 py-3.5 text-sm font-bold text-black transition hover:bg-green-deep"
+                >
+                  Começar grátis <ArrowRight className="h-4 w-4" />
+                </Link>
+              </span>
+              <a
+                href="#como-funciona"
+                className="inline-flex items-center gap-2 rounded-full border border-white/20 px-6 py-3.5 text-sm font-bold text-white transition hover:border-white/50"
+              >
+                Ver como funciona
+              </a>
+            </div>
+
+            <p className="reveal mt-6 text-[12.5px] text-white/45" style={{ animationDelay: "2.2s" }}>
+              Grátis no beta, por tempo indeterminado · sem cartão · cancele quando quiser
+            </p>
           </div>
 
-          <p className="reveal mt-5 text-[12.5px] text-white/45" style={{ animationDelay: "0.24s" }}>
-            7 dias grátis · sem cartão · cancele quando quiser
-          </p>
-
-          {/* Showcase — janela de navegador */}
-          <div
-            className="reveal mx-auto mt-16 max-w-3xl text-left"
-            style={{ animationDelay: "0.3s" }}
-          >
-            <div className="browser">
-              <div className="browser-bar">
-                <span className="browser-dot" style={{ background: "#ff5f57" }} />
-                <span className="browser-dot" style={{ background: "#febc2e" }} />
-                <span className="browser-dot" style={{ background: "#28c840" }} />
-                <span className="ml-3 rounded-md bg-white/5 px-3 py-1 text-[11px] text-white/40">
-                  app.nexo.events
-                </span>
-              </div>
-              <div className="grid gap-5 p-6 sm:grid-cols-3">
-                <div className="sm:col-span-2">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="text-[13px] font-bold">Summit de Marketing 2026</div>
-                      <div className="text-[11px] text-white/45">18 jun · São Paulo</div>
-                    </div>
-                    <span className="rounded-full border border-green/30 bg-green/10 px-2.5 py-1 text-[10.5px] font-bold text-green">
-                      Ativo
-                    </span>
-                  </div>
-                  <div className="mt-4 grid grid-cols-3 gap-3">
-                    {[
-                      ["312", "inscritos"],
-                      ["78%", "confirmados"],
-                      ["64%", "orçamento"],
-                    ].map(([v, l]) => (
-                      <div key={l} className="rounded-xl border border-white/8 bg-white/[0.03] p-3">
-                        <div className="text-lg font-extrabold tracking-[-0.02em]">{v}</div>
-                        <div className="text-[10px] uppercase tracking-[0.08em] text-white/45">{l}</div>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="bars mt-4">
-                    {[34, 52, 41, 68, 57, 80, 64, 92, 70, 86].map((h, i) => (
-                      <i key={i} style={{ height: `${h}%`, animationDelay: `${0.3 + i * 0.06}s` }} />
-                    ))}
-                  </div>
-                </div>
-                <div className="space-y-3">
-                  {[
-                    ["Checklist", "24/31 tarefas"],
-                    ["Financeiro", "R$ 115k / 180k"],
-                    ["Equipe", "5 responsáveis"],
-                  ].map(([t, s]) => (
-                    <div key={t} className="rounded-xl border border-white/8 bg-white/[0.03] p-3">
-                      <div className="text-[11px] uppercase tracking-[0.08em] text-white/45">{t}</div>
-                      <div className="mt-0.5 text-[13px] font-bold">{s}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
+          {/* coluna direita — módulos orbitando o hub */}
+          <div className="reveal" style={{ animationDelay: "0.3s" }}>
+            <HeroOrbits />
           </div>
         </div>
       </section>
@@ -319,12 +272,14 @@ export default function SiteHome() {
       <section id="precos" className="border-y border-black/8 bg-[#fafaf8]">
         <div className="mx-auto max-w-[var(--site-max)] px-6 py-24">
           <div className="mx-auto max-w-2xl text-center">
-            <span className="eyebrow text-green-deep">Escassez honesta</span>
+            <span className="eyebrow text-green-deep">Beta aberto</span>
             <h2 className="mt-4 text-[clamp(28px,4vw,46px)] font-extrabold leading-[1.1] tracking-[-0.03em]">
-              Um preço de <span className="mark-pill">fundador</span>. Para sempre.
+              Grátis <span className="mark-pill">por enquanto</span>. De verdade.
             </h2>
             <p className="mt-4 text-[16px] text-muted">
-              Comece com 7 dias grátis. Vire fundador e trave o preço enquanto a assinatura seguir ativa.
+              O Nexo está em beta: acesso completo, de graça, por tempo indeterminado. Em troca,
+              queremos seu feedback — os valores abaixo são a referência para quando o produto
+              estiver maduro.
             </p>
           </div>
 
@@ -352,7 +307,7 @@ export default function SiteHome() {
               Ver preços
             </a>
           </div>
-          <p className="mt-5 text-[12.5px] text-white/45">7 dias grátis · sem cartão · cancele quando quiser</p>
+          <p className="mt-5 text-[12.5px] text-white/45">Grátis no beta · sem cartão · cancele quando quiser</p>
         </div>
       </section>
     </>

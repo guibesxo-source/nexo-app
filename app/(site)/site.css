@@ -199,3 +199,288 @@ html:has(.site) {
   .marquee-track, .bars i, .eyebrow::before { animation: none; }
   .reveal { opacity: 1; transform: none; animation: none; }
 }
+
+/* ============================================================
+   PREÇOS — escada lado a lado: beta gratuito em destaque (card
+   preto com brilho verde da marca) + valores futuros como
+   referência. Entrada em cascata quando a seção aparece.
+   ============================================================ */
+/* Entrada: animação com atraso em cascata; hover: transition de `translate`
+   e sombra — canais separados, o atraso da entrada não atrapalha o hover. */
+.price-grid .price-card {
+  opacity: 0;
+  transition: translate 0.25s var(--ease), box-shadow 0.25s var(--ease);
+}
+.price-grid.in .price-card { animation: priceIn 0.7s var(--ease) both; }
+.price-grid.in .price-card:nth-child(2) { animation-delay: 0.12s; }
+.price-grid.in .price-card:nth-child(3) { animation-delay: 0.24s; }
+@keyframes priceIn {
+  from { opacity: 0; transform: translateY(22px); }
+  to { opacity: 1; transform: none; }
+}
+.price-grid.in .price-card:hover { translate: 0 -4px; box-shadow: var(--shadow-lg); }
+
+.price-featured {
+  background:
+    radial-gradient(120% 90% at 85% -10%, rgba(0, 228, 124, 0.26), transparent 55%),
+    radial-gradient(90% 70% at -10% 110%, rgba(0, 184, 99, 0.16), transparent 60%),
+    linear-gradient(160deg, #0d0d0c, #0a0a0a 55%, #10120f);
+  border: 1px solid rgba(0, 228, 124, 0.28);
+  box-shadow: 0 24px 70px -32px rgba(0, 228, 124, 0.4), var(--shadow-lg);
+}
+.price-glow {
+  position: absolute;
+  inset: -40%;
+  pointer-events: none;
+  background: radial-gradient(closest-side, rgba(0, 228, 124, 0.14), transparent 70%);
+  animation: priceGlow 9s ease-in-out infinite alternate;
+}
+@keyframes priceGlow {
+  from { transform: translate3d(-8%, -6%, 0) scale(1); }
+  to { transform: translate3d(10%, 8%, 0) scale(1.18); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .price-grid .price-card { opacity: 1; animation: none; transition: none; }
+  .price-glow { animation: none; }
+}
+
+/* ---------- Planos "bloqueados" (opcional no beta) ----------
+   Como personagem não desbloqueado: apagado e sem cor; o hover "acende". */
+.price-locked {
+  opacity: 0.55;
+  filter: grayscale(0.45);
+  transition: opacity 0.3s var(--ease), filter 0.3s var(--ease),
+    translate 0.25s var(--ease), box-shadow 0.25s var(--ease);
+}
+.price-grid.in .price-locked:hover { opacity: 1; filter: none; }
+
+/* ---------- Selo "grátis" do hero ---------- */
+.hero-free {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: #00e47c;
+  border: 1px solid rgba(0, 228, 124, 0.35);
+  background: rgba(0, 228, 124, 0.08);
+  padding: 4px 12px;
+  border-radius: 999px;
+  box-shadow: 0 0 26px rgba(0, 228, 124, 0.15);
+}
+.hero-free::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 99px;
+  background: #00e47c;
+  animation: pulse 2.4s var(--ease) infinite;
+}
+
+/* ---------- Hero vivo (HeroFX) ----------
+   Facho + grade revelados pelo cursor e orbs com parallax — a linguagem do
+   painel de marca do login, portada pro site. Vars --hx/--hy/--hpx/--hpy
+   são escritas pelo client component na própria .hero. */
+.hero-fx {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+.hero-spot {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(
+      600px circle at var(--hx, 50%) var(--hy, 30%),
+      rgba(0, 228, 124, 0.16),
+      rgba(0, 228, 124, 0.05) 40%,
+      transparent 65%
+    );
+}
+.hero-orb {
+  position: absolute;
+  border-radius: 999px;
+  filter: blur(72px);
+}
+.hero-orb.o1 {
+  width: 480px; height: 480px; top: -14%; left: -8%;
+  opacity: 0.26;
+  background: radial-gradient(circle at 30% 30%, #00e47c, transparent 65%);
+  animation: heroFloat 18s ease-in-out infinite alternate;
+  translate: calc(var(--hpx, 0) * 34px) calc(var(--hpy, 0) * 24px);
+}
+.hero-orb.o2 {
+  width: 430px; height: 430px; bottom: -18%; right: -10%;
+  opacity: 0.2;
+  background: radial-gradient(circle at 70% 70%, #00b863, transparent 65%);
+  animation: heroFloat 23s ease-in-out infinite alternate-reverse;
+  translate: calc(var(--hpx, 0) * -48px) calc(var(--hpy, 0) * -34px);
+}
+@keyframes heroFloat {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(46px, 34px, 0) scale(1.14); }
+}
+/* a grade passa a se revelar ao redor do cursor quando o FX está ativo */
+.hero.fx::after {
+  mask-image: radial-gradient(ellipse 62% 56% at var(--hx, 50%) var(--hy, 30%), black 22%, transparent 76%);
+  -webkit-mask-image: radial-gradient(ellipse 62% 56% at var(--hx, 50%) var(--hy, 30%), black 22%, transparent 76%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-orb { animation: none; translate: none; transition: none; }
+  .hero-free::before { animation: none; }
+  .price-locked { transition: none; }
+}
+
+/* ---------- Typewriter do headline ---------- */
+.tw-caret {
+  display: inline-block;
+  width: 0.09em;
+  height: 0.82em;
+  margin-left: 0.06em;
+  vertical-align: -0.08em;
+  background: #00e47c;
+  animation: caretBlink 0.9s steps(2, start) infinite;
+}
+@keyframes caretBlink {
+  50% { opacity: 0; }
+}
+
+/* ---------- CTA com borda giratória (conic-gradient) ---------- */
+@property --border-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+.btn-spin {
+  position: relative;
+  display: inline-flex;
+  border-radius: 999px;
+}
+.btn-spin::before {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 999px;
+  padding: 3px;
+  background: conic-gradient(
+    from var(--border-angle),
+    #00e47c, #050505 28%, #00e47c 50%, #050505 78%, #00e47c
+  );
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  animation: borderSpin 3s linear infinite;
+  pointer-events: none;
+}
+@keyframes borderSpin {
+  to { --border-angle: 360deg; }
+}
+
+/* ---------- Órbitas do hub (hero direita) ----------
+   Anéis concêntricos com borda em gradiente (técnica de mask), girando
+   devagar em direções alternadas; os chips contra-giram pra ficar em pé
+   e entram com um "fly-in" escalonado. Escala controlada por --os. */
+.orbits-box {
+  --os: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: calc(600px * var(--os));
+}
+.orbits {
+  position: relative;
+  width: 600px;
+  height: 600px;
+  flex: none;
+  transform: scale(var(--os));
+}
+.orbits .ring,
+.orbits .orbit,
+.orbits .hub {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  translate: -50% -50%;
+}
+.orbits .ring {
+  border-radius: 999px;
+  padding: 1px;
+  background: linear-gradient(
+    180deg,
+    rgba(0, 228, 124, 0) 0%,
+    rgba(0, 228, 124, 0.75) 43%,
+    rgba(0, 228, 124, 0) 100%
+  );
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+}
+.orbits .cw { animation: spinCW 40s linear infinite; }
+.orbits .ccw { animation: spinCCW 40s linear infinite; }
+@keyframes spinCW { to { rotate: 360deg; } }
+@keyframes spinCCW { to { rotate: -360deg; } }
+
+.orbits .hub {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 190px;
+  height: 190px;
+  border-radius: 999px;
+  text-align: center;
+  background:
+    radial-gradient(70% 70% at 50% 30%, rgba(0, 228, 124, 0.14), transparent 70%),
+    #0a0a0a;
+  border: 1px solid rgba(0, 228, 124, 0.25);
+  box-shadow: 0 0 70px rgba(0, 228, 124, 0.18);
+}
+.hub-mark {
+  width: 12px;
+  height: 12px;
+  border-radius: 99px;
+  margin-bottom: 10px;
+  background: #00e47c;
+  box-shadow: 0 0 0 3px #000, 0 0 0 5px #00e47c;
+}
+
+.orbits .sat { position: absolute; top: 50%; left: 50%; }
+.sat-spin.cw { animation: spinCCW 40s linear infinite; }
+.sat-spin.ccw { animation: spinCW 40s linear infinite; }
+.sat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+  padding: 9px 15px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: rgba(255, 255, 255, 0.88);
+  background: rgba(10, 10, 10, 0.92);
+  border: 1px solid rgba(0, 228, 124, 0.3);
+  box-shadow: 0 0 26px rgba(0, 228, 124, 0.16), 0 14px 34px -16px rgba(0, 0, 0, 0.8);
+  opacity: 0;
+  animation: satIn 0.7s var(--ease) forwards;
+}
+@keyframes satIn {
+  from { opacity: 0; transform: scale(0.3) rotate(-180deg); filter: blur(8px); }
+  to { opacity: 1; transform: none; filter: none; }
+}
+
+@media (max-width: 1279px) { .orbits-box { --os: 0.85; } }
+@media (max-width: 1023px) { .orbits-box { --os: 0.7; } }
+@media (max-width: 639px) { .orbits-box { --os: 0.52; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .tw-caret, .btn-spin::before { animation: none; }
+  .orbits .cw, .orbits .ccw, .sat-spin.cw, .sat-spin.ccw { animation: none; }
+  .sat-chip { animation: none; opacity: 1; }
+}
