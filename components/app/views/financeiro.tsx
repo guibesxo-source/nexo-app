@@ -30,7 +30,7 @@ import type { Transaction, TxKind, TxPayment } from "@/types";
 type DocFile = { name: string; data: string };
 
 /** Lê NF/boleto: imagem é comprimida; PDF entra como está (limite da fase local). */
-async function readDocFile(file: File): Promise<DocFile> {
+export async function readDocFile(file: File): Promise<DocFile> {
   if (file.type.startsWith("image/")) {
     return { name: file.name, data: await compressImage(file, 1400, 0.8) };
   }
@@ -83,7 +83,7 @@ function AttachDocField({ label, short, value, onChange }: {
   );
 }
 
-function TxFormModal({ eventId, tx, onClose }: {
+export function TxFormModal({ eventId, tx, onClose }: {
   eventId: string; tx?: Transaction; onClose: () => void;
 }) {
   const db = useDb();

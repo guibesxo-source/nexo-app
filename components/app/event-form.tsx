@@ -9,6 +9,7 @@ import {
   createEvent,
   createHubspotIngest,
   EVENT_COVERS,
+  setEventEnd,
   updateEvent,
   useDb,
 } from "@/lib/db";
@@ -42,6 +43,12 @@ export function EventFormModal({ event, onClose }: { event?: Event; onClose: () 
     cover: event?.cover ?? EVENT_COVERS[db.events.length % EVENT_COVERS.length].css,
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // Evento de mais de um dia: o último dia vive em settings (event_ends) até a
+  // coluna existir no banco — o form lê/grava por fora do draft do evento.
+  const savedEnd = event ? db.settings.event_ends?.[event.id] ?? "" : "";
+  const [multiday, setMultiday] = useState(!!savedEnd);
+  const [endsOn, setEndsOn] = useState(savedEnd);
 
   // Checklist inicial (só na criação): segue o formato escolhido até o
   // usuário mexer no select — aí a escolha manual passa a valer.
@@ -94,23 +101,32 @@ export function EventFormModal({ event, onClose }: { event?: Event; onClose: () 
       format: form.format || undefined,
       priority: form.priority,
     });
+    const errs: Record<string, string> = {};
     if (!parsed.success) {
-      const errs: Record<string, string> = {};
       for (const issue of parsed.error.issues) {
         const k = String(issue.path[0]);
         if (!errs[k]) errs[k] = issue.message;
       }
+    }
+    if (multiday) {
+      const startDay = form.starts_at.slice(0, 10);
+      if (!endsOn) errs.ends_on ??= "Informe o último dia";
+      else if (startDay && endsOn <= startDay) errs.ends_on ??= "O último dia deve ser depois do início";
+    }
+    if (!parsed.success || Object.keys(errs).length > 0) {
       setErrors(errs);
       return;
     }
     if (event) {
       updateEvent(event.id, parsed.data);
+      setEventEnd(event.id, multiday ? endsOn : null);
       toast("Evento atualizado");
       onClose();
       return;
     }
 
     const id = createEvent(parsed.data);
+    if (multiday && endsOn) setEventEnd(id, endsOn);
     const tpl = templates.find((t) => t.id === templateId);
     const n = tpl ? applyTemplate(id, tpl) : 0;
 
@@ -167,9 +183,36 @@ export function EventFormModal({ event, onClose }: { event?: Event; onClose: () 
         />
       </Field>
       <div className="form-grid">
-        <Field label="Data e hora" error={errors.starts_at}>
+        <Field label={multiday ? "Começa em" : "Data e hora"} error={errors.starts_at}>
           <input className="input" type="datetime-local" value={form.starts_at} onChange={set("starts_at")} />
+          <button
+            type="button"
+            className="multiday-toggle"
+            onClick={() => {
+              setMultiday((m) => !m);
+              if (multiday) setEndsOn("");
+              setErrors((prev) => {
+                const rest = { ...prev };
+                delete rest.ends_on;
+                return rest;
+              });
+            }}
+          >
+            <Icon name={multiday ? "x" : "plus"} size={12} />
+            {multiday ? "Voltar para dia único" : "Evento de mais de um dia"}
+          </button>
         </Field>
+        {multiday && (
+          <Field label="Termina em (último dia)" error={errors.ends_on}>
+            <input
+              className="input"
+              type="date"
+              min={form.starts_at ? form.starts_at.slice(0, 10) : undefined}
+              value={endsOn}
+              onChange={(e) => setEndsOn(e.target.value)}
+            />
+          </Field>
+        )}
         <Field label="Local" error={errors.location}>
           <input className="input" placeholder="Cidade ou Online" value={form.location} onChange={set("location")} />
         </Field>

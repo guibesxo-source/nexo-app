@@ -277,6 +277,99 @@ export type EventFile = {
   created_at: string;
 };
 
+/* ---------- Operação do evento (vivem no blob de settings; sem tabela própria) ---------- */
+
+export type AgendaKind =
+  | "abertura"
+  | "palestra"
+  | "painel"
+  | "intervalo"
+  | "networking"
+  | "encerramento"
+  | "outro";
+
+/** Bloco da programação do evento (agenda do dia). */
+export type AgendaItem = {
+  id: string;
+  event_id: string;
+  day: string; // YYYY-MM-DD
+  start: string; // HH:MM
+  end?: string | null; // HH:MM
+  title: string;
+  speaker?: string | null;
+  location?: string | null; // sala/palco/link
+  kind: AgendaKind;
+  notes?: string | null;
+};
+
+/** Lote/tipo de ingresso planejado — controle de back-office (a venda fica no
+    ticketing: Sympla etc.). A ocupação é derivada dos inscritos pelo nome. */
+export type TicketBatch = {
+  id: string;
+  event_id: string;
+  name: string; // deve casar com o `ticket` dos inscritos (ex.: "Lote 1", "VIP")
+  price: number; // 0 = gratuito
+  quantity: number; // capacidade do lote
+  starts_on?: string | null; // vigência (YYYY-MM-DD)
+  ends_on?: string | null;
+  active: boolean;
+  created_at: string;
+};
+
+export type SegmentOrigin = "todos" | "sympla" | "hubspot" | "csv" | "manual";
+
+/** Segmento salvo de inscritos: um filtro nomeado e reutilizável (a contagem é viva). */
+export type SavedSegment = {
+  id: string;
+  event_id: string;
+  name: string;
+  status: AttendeeStatus | "todos";
+  origin: SegmentOrigin;
+  q?: string | null; // busca livre (nome/e-mail/empresa)
+  field_key?: string | null; // filtro por campo de lead
+  field_value?: string | null;
+  created_at: string;
+};
+
+export type CommChannel = "email" | "whatsapp";
+
+/** Modelo de mensagem com variáveis ({{nome}}, {{evento}}, {{data}}, {{local}}). */
+export type CommTemplate = {
+  id: string;
+  name: string;
+  channel: CommChannel;
+  subject?: string | null; // só e-mail
+  body: string;
+  builtin?: boolean;
+  created_at: string;
+};
+
+/** Registro de uma comunicação feita (o envio acontece na ferramenta do usuário). */
+export type CommLogEntry = {
+  id: string;
+  event_id: string;
+  channel: CommChannel;
+  subject: string;
+  audience: string; // descrição do público (ex.: "Confirmados")
+  count: number; // destinatários no momento do envio
+  sent_at: string;
+};
+
+export type CouponKind = "percent" | "fixed" | "cortesia";
+
+/** Cupom/código registrado — os resgates são detectados nos campos de lead dos inscritos. */
+export type Coupon = {
+  id: string;
+  event_id: string;
+  code: string;
+  kind: CouponKind;
+  value: number; // % (percent) ou R$ (fixed); cortesia ignora
+  max_uses?: number | null;
+  note?: string | null;
+  active: boolean;
+  created_at: string;
+};
+
 export type AppSettings = {
   toggles: Record<string, boolean>;
   /** Token da API pública do Sympla (integração de importação de inscritos). */
@@ -304,6 +397,21 @@ export type AppSettings = {
   /** Atributos de lead exibidos como cards de "Segmentação de leads" no dashboard
      (chaves de lead_fields). Ausente = escolha automática; [] = nenhum. */
   dashboard_lead_breakdowns?: string[] | null;
+  /** Programação (agenda) por evento — chave = event_id. */
+  agenda_items?: Record<string, AgendaItem[]>;
+  /** Lotes/tipos de ingresso planejados por evento — chave = event_id. */
+  ticket_batches?: Record<string, TicketBatch[]>;
+  /** Segmentos salvos de inscritos (filtros nomeados; contagem sempre viva). */
+  saved_segments?: SavedSegment[];
+  /** Modelos de mensagem do usuário (além dos built-in). */
+  comm_templates?: CommTemplate[];
+  /** Histórico de comunicações registradas (mais recente primeiro). */
+  comm_log?: CommLogEntry[];
+  /** Cupons/códigos de desconto por evento — chave = event_id. */
+  coupons?: Record<string, Coupon[]>;
+  /** Último dia de eventos com mais de um dia — chave = event_id, valor YYYY-MM-DD.
+      (Extensão da UI sobre o DDL: `events` só tem starts_at; vira coluna numa migration futura.) */
+  event_ends?: Record<string, string>;
 };
 
 export type Session = {

@@ -26,6 +26,15 @@ export type Subscription = {
   updated_at?: string | null;
 };
 
+/**
+ * Beta gratuito por tempo indeterminado (decisão de 2026-07-04 — ADR-004 no
+ * vault): ninguém é bloqueado e nada é cobrado; o objetivo é coletar feedback
+ * e amadurecer o produto antes de aplicar a Estrutura de Preços. Toda a
+ * infraestrutura de billing (trial, subscriptions, AbacatePay, webhook) fica
+ * DORMENTE — para reativar o paywall, basta virar esta flag para false.
+ */
+export const FREE_BETA = true;
+
 /** Dias do período de teste concedido a cada conta nova. */
 export const TRIAL_DAYS = 7;
 
@@ -46,6 +55,7 @@ function periodEndMs(sub: Subscription): number | null {
  * - demais (`past_due`/`canceled`/`expired`/sem assinatura): bloqueado.
  */
 export function isEntitled(sub: Subscription | null | undefined): boolean {
+  if (FREE_BETA) return true;
   if (!sub) return false;
   const end = periodEndMs(sub);
   if (sub.status === "active") return end == null || end > Date.now();

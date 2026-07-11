@@ -2,10 +2,12 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { FREE_BETA } from "@/lib/billing/entitlement";
 
 // Faixa fina no topo do app durante o teste grátis: conta os dias restantes e
 // leva pra /planos. Lê o estado real em /api/billing/status (a fonte é a tabela
-// subscriptions). Some quando a assinatura já está ativa.
+// subscriptions). Some quando a assinatura já está ativa — e fica mudo no beta
+// gratuito (ADR-004): sem contagem, sem cobrança, sem nag.
 export function TrialBanner() {
   const [info, setInfo] = useState<{ status: string | null; trialDaysLeft: number } | null>(null);
 
@@ -20,6 +22,7 @@ export function TrialBanner() {
     };
   }, []);
 
+  if (FREE_BETA) return null;
   if (!info || info.status !== "trialing") return null;
   const d = info.trialDaysLeft;
 

@@ -10,6 +10,7 @@ import {
   deleteEvent,
   EVENT_PRIORITY_META,
   EVENT_STATUS_META,
+  eventEndsOn,
   memberById,
   priorityOf,
   restoreEvent,
@@ -19,7 +20,7 @@ import {
   updateEvent,
   useDb,
 } from "@/lib/db";
-import { fmtDate } from "@/lib/format";
+import { daysUntil, fmtDate, fmtDateRange } from "@/lib/format";
 import type { Event, EventPriority } from "@/types";
 
 const FILTERS: [string, string][] = [
@@ -58,14 +59,136 @@ export function Eventos() {
   const byStatus = db.events.filter((e) => filter === "todos" || e.status === filter);
   const prioCount = (p: EventPriority) => byStatus.filter((e) => priorityOf(e) === p).length;
   const list = byStatus.filter((e) => !prio || priorityOf(e) === prio);
+  // O que já acabou não se mistura com o que está rodando: encerrados/cancelados
+  // saem dos grupos por formato e descem para uma seção própria, apagada.
+  const isDone = (e: Event) => e.status === "encerrado" || e.status === "cancelado";
+  const running = list.filter((e) => !isDone(e));
+  const finished = list.filter(isDone);
   const sections = FORMAT_SECTIONS
-    .map(([key, label]) => ({ key, label, events: list.filter((e) => (e.format ?? "indefinido") === key) }))
+    .map(([key, label]) => ({ key, label, events: running.filter((e) => (e.format ?? "indefinido") === key) }))
     .filter((s) => s.events.length > 0);
   const totalAttendees = db.attendees.filter((a) => a.status !== "cancelado").length;
 
   // Trocar o evento ativo muda dashboard/inscritos/checklist/financeiro:
   // confirma antes (a navegação real acontece no onConfirm do diálogo).
   const open = (ev: Event) => setConfirmSelect(ev);
+
+  const renderCard = (ev: Event) => {
+    const done = isDone(ev);
+    const reg = attendeesOf(db, ev.id).filter((a) => a.status !== "cancelado").length;
+    const team = [
+      ...new Set(
+        tasksOf(db, ev.id)
+          .map((t) => t.assignee_id)
+          .filter((id): id is string => !!id)
+      ),
+    ];
+    const meta = EVENT_STATUS_META[ev.status];
+    const pr = priorityOf(ev);
+    // Chip de tempo: dá o "pulso" do card — evento vivo conta pra frente,
+    // evento que acabou conta pra trás (e o card inteiro fica apagado).
+    // Com mais de um dia, o fim do evento é o último dia (event_ends).
+    const ends = eventEndsOn(db, ev.id);
+    const d = ev.starts_at ? daysUntil(ev.starts_at) : 0;
+    const endD = ends ? daysUntil(ends) : d;
+    const when = done
+      ? { cls: "past", text: endD < 0 ? `há ${-endD} dia${endD === -1 ? "" : "s"}` : "encerrado", dot: false }
+      : d <= 0 && endD >= 0
+        ? {
+            cls: "today",
+            text: d === 0 && endD === 0 ? "é hoje" : d === 0 ? "começa hoje" : "acontecendo",
+            dot: true,
+          }
+        : d > 0
+          ? { cls: d <= 7 ? "soon" : "future", text: `em ${d} dia${d === 1 ? "" : "s"}`, dot: d <= 7 }
+          : { cls: "overdue", text: `aconteceu há ${-endD} dia${endD === -1 ? "" : "s"} — encerrar?`, dot: false };
+    return (
+      <div className={"evcard" + (done ? " done" : "")} key={ev.id} onClick={() => open(ev)}>
+        <div className="evcard-cover" style={{ backgroundImage: ev.cover }}>
+          <span className={"ev-when " + when.cls}>
+            {when.dot && <i />}
+            {when.text}
+          </span>
+          <span className="evcard-status" style={{ display: "flex", gap: 6 }}>
+            <Badge tone={meta.tone} dot>{meta.label}</Badge>
+            {pr !== "media" && (
+              <Badge tone={EVENT_PRIORITY_META[pr].tone} dot>
+                {EVENT_PRIORITY_META[pr].label}
+              </Badge>
+            )}
+          </span>
+        </div>
+        <div className="evcard-body">
+          <div className="nm">{ev.name}</div>
+          <div className="meta">
+            <span className="row" style={{ gap: 5 }}>
+              <Icon name="calendar" size={13} />
+              {ends ? fmtDateRange(ev.starts_at, ends) : fmtDate(ev.starts_at)}
+            </span>
+            <span style={{ opacity: 0.4 }}>·</span>
+            <span className="row" style={{ gap: 5 }}>
+              <Icon name="mapPin" size={13} />{ev.location}
+            </span>
+          </div>
+        </div>
+        <div className="evcard-foot">
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700 }}>{reg} / {ev.capacity}</div>
+            <div style={{ fontSize: 11, color: "var(--dim)" }}>inscritos</div>
+          </div>
+          <div className="row" style={{ gap: 8 }}>
+            <div className="avatar-stack">
+              {team.slice(0, 3).map((id) => {
+                const m = memberById(db, id);
+                return m && <Avatar key={id} initials={m.initials} size="sm" />;
+              })}
+              {team.length > 3 && <span className="avatar sm more">+{team.length - 3}</span>}
+            </div>
+            <button
+              className="row-action"
+              title="Editar evento"
+              onClick={(e) => {
+                e.stopPropagation();
+                setEditing(ev);
+              }}
+            >
+              <Icon name="edit" size={16} />
+            </button>
+            <button
+              className="row-action danger"
+              title="Excluir evento"
+              onClick={(e) => {
+                e.stopPropagation();
+                setConfirmDelete(ev);
+              }}
+            >
+              <Icon name="trash" size={16} />
+            </button>
+            <Menu
+              items={[
+                { label: "Abrir visão geral", onClick: () => open(ev) },
+                { label: "Editar", onClick: () => setEditing(ev) },
+                ...(ev.status !== "encerrado"
+                  ? [{
+                      label: "Encerrar evento",
+                      onClick: () => {
+                        updateEvent(ev.id, { status: "encerrado" });
+                        toast("Evento encerrado");
+                      },
+                    }]
+                  : []),
+                {
+                  label: "Excluir",
+                  danger: true,
+                  onClick: () => setConfirmDelete(ev),
+                },
+              ]}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="view">
@@ -127,110 +250,34 @@ export function Eventos() {
           }
         />
       ) : (
-        sections.map((sec) => (
-          <div key={sec.key}>
-            <div className="task-group-head" style={{ marginTop: 0 }}>
-              <span className="tg-title">{sec.label}</span>
-              <span className="tg-count">{sec.events.length}</span>
-              <span className="tg-line" />
-            </div>
-            <div className="evlist" style={{ marginBottom: 18 }}>
-          {sec.events.map((ev) => {
-            const reg = attendeesOf(db, ev.id).filter((a) => a.status !== "cancelado").length;
-            const team = [
-              ...new Set(
-                tasksOf(db, ev.id)
-                  .map((t) => t.assignee_id)
-                  .filter((id): id is string => !!id)
-              ),
-            ];
-            const meta = EVENT_STATUS_META[ev.status];
-            const pr = priorityOf(ev);
-            return (
-              <div className="evcard" key={ev.id} onClick={() => open(ev)}>
-                <div className="evcard-cover" style={{ backgroundImage: ev.cover }}>
-                  <span className="evcard-status" style={{ display: "flex", gap: 6 }}>
-                    <Badge tone={meta.tone} dot>{meta.label}</Badge>
-                    {pr !== "media" && (
-                      <Badge tone={EVENT_PRIORITY_META[pr].tone} dot>
-                        {EVENT_PRIORITY_META[pr].label}
-                      </Badge>
-                    )}
-                  </span>
-                </div>
-                <div className="evcard-body">
-                  <div className="nm">{ev.name}</div>
-                  <div className="meta">
-                    <span className="row" style={{ gap: 5 }}>
-                      <Icon name="calendar" size={13} />{fmtDate(ev.starts_at)}
-                    </span>
-                    <span style={{ opacity: 0.4 }}>·</span>
-                    <span className="row" style={{ gap: 5 }}>
-                      <Icon name="mapPin" size={13} />{ev.location}
-                    </span>
-                  </div>
-                </div>
-                <div className="evcard-foot">
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 700 }}>{reg} / {ev.capacity}</div>
-                    <div style={{ fontSize: 11, color: "var(--dim)" }}>inscritos</div>
-                  </div>
-                  <div className="row" style={{ gap: 8 }}>
-                    <div className="avatar-stack">
-                      {team.slice(0, 3).map((id) => {
-                        const m = memberById(db, id);
-                        return m && <Avatar key={id} initials={m.initials} size="sm" />;
-                      })}
-                      {team.length > 3 && <span className="avatar sm more">+{team.length - 3}</span>}
-                    </div>
-                    <button
-                      className="row-action"
-                      title="Editar evento"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setEditing(ev);
-                      }}
-                    >
-                      <Icon name="edit" size={16} />
-                    </button>
-                    <button
-                      className="row-action danger"
-                      title="Excluir evento"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setConfirmDelete(ev);
-                      }}
-                    >
-                      <Icon name="trash" size={16} />
-                    </button>
-                    <Menu
-                      items={[
-                        { label: "Abrir visão geral", onClick: () => open(ev) },
-                        { label: "Editar", onClick: () => setEditing(ev) },
-                        ...(ev.status !== "encerrado"
-                          ? [{
-                              label: "Encerrar evento",
-                              onClick: () => {
-                                updateEvent(ev.id, { status: "encerrado" });
-                                toast("Evento encerrado");
-                              },
-                            }]
-                          : []),
-                        {
-                          label: "Excluir",
-                          danger: true,
-                          onClick: () => setConfirmDelete(ev),
-                        },
-                      ]}
-                    />
-                  </div>
-                </div>
+        <>
+          {sections.map((sec) => (
+            <div key={sec.key}>
+              <div className="task-group-head" style={{ marginTop: 0 }}>
+                <span className="tg-title">{sec.label}</span>
+                <span className="tg-count">{sec.events.length}</span>
+                <span className="tg-line" />
               </div>
-            );
-          })}
+              <div className="evlist" style={{ marginBottom: 18 }}>
+                {sec.events.map(renderCard)}
+              </div>
             </div>
-          </div>
-        ))
+          ))}
+          {finished.length > 0 && (
+            <div>
+              <div className="task-group-head evdone-head" style={{ marginTop: 0 }}>
+                <span className="tg-title">
+                  {finished.some((e) => e.status === "cancelado") ? "Encerrados & cancelados" : "Encerrados"}
+                </span>
+                <span className="tg-count">{finished.length}</span>
+                <span className="tg-line" />
+              </div>
+              <div className="evlist" style={{ marginBottom: 18 }}>
+                {finished.map(renderCard)}
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {editing && <EventFormModal event={editing} onClose={() => setEditing(null)} />}

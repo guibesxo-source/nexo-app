@@ -3,9 +3,14 @@
 // virarão views/queries (ex.: event_overview).
 
 import type {
+  AgendaItem,
+  AgendaKind,
   Attendee,
   AttendeeStatus,
   ChecklistTemplate,
+  CommLogEntry,
+  CommTemplate,
+  Coupon,
   CustomMetric,
   CustomMetricFormat,
   CustomMetricSource,
@@ -16,13 +21,15 @@ import type {
   EventFileCategory,
   EventPriority,
   EventStatus,
+  SavedSegment,
   Task,
   TaskPhase,
+  TicketBatch,
   Transaction,
 } from "@/types";
 import type { DbState } from "./seed";
-import { BUILTIN_TEMPLATES } from "./actions";
-import { daysUntil, fmtMoney } from "@/lib/format";
+import { BUILTIN_COMM_TEMPLATES, BUILTIN_TEMPLATES } from "./actions";
+import { daysUntil, fmtDate, fmtMoney } from "@/lib/format";
 
 /* ---------- Metadados de status (tom do Badge + rótulo) ---------- */
 
@@ -904,6 +911,209 @@ export const DEFAULT_DASHBOARD: DashboardConfig = {
 /** Config efetiva do dashboard: a salva ou o padrão. */
 export const dashboardConfig = (s: DbState): DashboardConfig =>
   s.settings.dashboard ?? DEFAULT_DASHBOARD;
+
+/** Último dia do evento (YYYY-MM-DD) quando ele tem mais de um dia; null = dia único. */
+export function eventEndsOn(s: DbState, eventId: string): string | null {
+  return s.settings.event_ends?.[eventId] ?? null;
+}
+
+/* ---------- Origem do inscrito (canal de captação) ---------- */
+
+export type AttendeeOrigin = "sympla" | "hubspot" | "csv" | "manual";
+
+export const ORIGIN_META: Record<AttendeeOrigin, { label: string; tone: string }> = {
+  sympla: { label: "Sympla", tone: "blue" },
+  hubspot: { label: "HubSpot", tone: "amber" },
+  csv: { label: "Planilha/CSV", tone: "gray" },
+  manual: { label: "Manual", tone: "green" },
+};
+
+export const originOf = (a: Attendee): AttendeeOrigin => a.external_source ?? "manual";
+
+/** Distribuição dos inscritos (não-cancelados) de um evento por origem. */
+export function originBreakdown(s: DbState, eventId: string): { origin: AttendeeOrigin; count: number }[] {
+  const counts = new Map<AttendeeOrigin, number>();
+  for (const a of attendeesOf(s, eventId)) {
+    if (a.status === "cancelado") continue;
+    const o = originOf(a);
+    counts.set(o, (counts.get(o) ?? 0) + 1);
+  }
+  return (["sympla", "hubspot", "csv", "manual"] as AttendeeOrigin[])
+    .map((origin) => ({ origin, count: counts.get(origin) ?? 0 }))
+    .filter((r) => r.count > 0);
+}
+
+/* ---------- Programação (agenda do evento) ---------- */
+
+export const AGENDA_KIND_META: Record<AgendaKind, { label: string; tone: string }> = {
+  abertura: { label: "Abertura", tone: "green" },
+  palestra: { label: "Palestra", tone: "blue" },
+  painel: { label: "Painel", tone: "purple" },
+  intervalo: { label: "Intervalo", tone: "gray" },
+  networking: { label: "Networking", tone: "amber" },
+  encerramento: { label: "Encerramento", tone: "green" },
+  outro: { label: "Outro", tone: "gray" },
+};
+
+/** Blocos da programação do evento, ordenados por dia + hora de início. */
+export function agendaOf(s: DbState, eventId: string): AgendaItem[] {
+  return (s.settings.agenda_items?.[eventId] ?? [])
+    .slice()
+    .sort((a, b) => (a.day + a.start).localeCompare(b.day + b.start));
+}
+
+/** Pares de blocos do mesmo dia com horários sobrepostos (alerta de conflito). */
+export function agendaConflicts(items: AgendaItem[]): [AgendaItem, AgendaItem][] {
+  const out: [AgendaItem, AgendaItem][] = [];
+  for (let i = 0; i < items.length; i++) {
+    for (let j = i + 1; j < items.length; j++) {
+      const a = items[i];
+      const b = items[j];
+      if (a.day !== b.day) continue;
+      const aEnd = a.end ?? a.start;
+      const bEnd = b.end ?? b.start;
+      if (a.start < bEnd && b.start < aEnd && !(a.end === null && b.end === null)) {
+        out.push([a, b]);
+      }
+    }
+  }
+  return out;
+}
+
+/* ---------- Ingressos & lotes ---------- */
+
+export function ticketBatchesOf(s: DbState, eventId: string): TicketBatch[] {
+  return (s.settings.ticket_batches?.[eventId] ?? [])
+    .slice()
+    .sort((a, b) => a.created_at.localeCompare(b.created_at));
+}
+
+/** Tipos de ingresso em uso pelos inscritos reais (não-cancelados), maior primeiro. */
+export function ticketTypeStats(s: DbState, eventId: string): { name: string; count: number; checkin: number }[] {
+  const map = new Map<string, { name: string; count: number; checkin: number }>();
+  for (const a of attendeesOf(s, eventId)) {
+    if (a.status === "cancelado") continue;
+    const name = (a.ticket || "Geral").trim();
+    const key = name.toLowerCase();
+    const cur = map.get(key) ?? { name, count: 0, checkin: 0 };
+    cur.count++;
+    if (a.status === "checkin") cur.checkin++;
+    map.set(key, cur);
+  }
+  return [...map.values()].sort((a, b) => b.count - a.count);
+}
+
+export type BatchStats = {
+  sold: number; // inscritos reais com esse tipo de ingresso
+  pct: number; // ocupação vs. quantity
+  revenue: number; // sold × price
+};
+
+/** Ocupação de um lote: casa o nome do lote com o `ticket` dos inscritos. */
+export function batchStats(s: DbState, eventId: string, batch: TicketBatch): BatchStats {
+  const key = batch.name.trim().toLowerCase();
+  const sold = attendeesOf(s, eventId).filter(
+    (a) => a.status !== "cancelado" && (a.ticket || "").trim().toLowerCase() === key
+  ).length;
+  return {
+    sold,
+    pct: batch.quantity > 0 ? Math.round((sold / batch.quantity) * 100) : 0,
+    revenue: sold * batch.price,
+  };
+}
+
+/* ---------- Segmentos de inscritos (filtros nomeados, contagem viva) ---------- */
+
+export type SegmentFilter = Pick<SavedSegment, "status" | "origin" | "q" | "field_key" | "field_value">;
+
+/** Aplica um filtro de segmento aos inscritos (não-cancelados, exceto se o
+    status pedido for explicitamente "cancelado"). */
+export function segmentAttendees(s: DbState, eventId: string, f: SegmentFilter): Attendee[] {
+  const q = (f.q ?? "").trim().toLowerCase();
+  return attendeesOf(s, eventId).filter((a) => {
+    if (f.status === "todos" ? a.status === "cancelado" : a.status !== f.status) return false;
+    if (f.origin !== "todos" && originOf(a) !== f.origin) return false;
+    if (q && !(a.name + " " + a.email + " " + a.company).toLowerCase().includes(q)) return false;
+    if (f.field_key && f.field_value) {
+      const field = (a.lead_fields ?? []).find((x) => x.key === f.field_key);
+      if (!field || field.value !== f.field_value) return false;
+    }
+    return true;
+  });
+}
+
+export function savedSegmentsOf(s: DbState, eventId: string): SavedSegment[] {
+  return (s.settings.saved_segments ?? []).filter((seg) => seg.event_id === eventId);
+}
+
+/** Telefone do inscrito, se algum campo de lead trouxer (WhatsApp/celular/fone). */
+export function leadPhone(a: Attendee): string | null {
+  for (const f of a.lead_fields ?? []) {
+    if (!/phone|telefone|celular|whats|fone/i.test(f.key + " " + f.label)) continue;
+    const digits = f.value.replace(/\D/g, "");
+    if (digits.length >= 10) return digits;
+  }
+  return null;
+}
+
+/* ---------- Comunicação ---------- */
+
+/** Modelos disponíveis: built-in genéricos + os do usuário. */
+export const allCommTemplates = (s: DbState): CommTemplate[] => [
+  ...(s.settings.comm_templates ?? []),
+  ...BUILTIN_COMM_TEMPLATES,
+];
+
+export function commLogOf(s: DbState, eventId: string): CommLogEntry[] {
+  return (s.settings.comm_log ?? []).filter((e) => e.event_id === eventId);
+}
+
+/** Substitui as variáveis do modelo. {{nome}} vira o nome real por destinatário —
+    quando não há um destinatário único, fica como marcador para o mail merge. */
+export function renderCommText(text: string, ev: Event, attendeeName?: string): string {
+  return text
+    .replaceAll("{{evento}}", ev.name)
+    .replaceAll("{{data}}", fmtDate(ev.starts_at))
+    .replaceAll("{{local}}", ev.location || "a definir")
+    .replaceAll("{{nome}}", attendeeName ?? "{{nome}}");
+}
+
+/* ---------- Cupons & descontos ---------- */
+
+export function couponsOf(s: DbState, eventId: string): Coupon[] {
+  return s.settings.coupons?.[eventId] ?? [];
+}
+
+const couponNorm = (v: string) => v.toUpperCase().replace(/\s+/g, "");
+
+/** Inscritos cujo lead trouxe exatamente este código em algum campo. */
+export function couponRedemptions(s: DbState, eventId: string, code: string): Attendee[] {
+  const target = couponNorm(code);
+  if (!target) return [];
+  return attendeesOf(s, eventId).filter(
+    (a) =>
+      a.status !== "cancelado" &&
+      (a.lead_fields ?? []).some((f) => couponNorm(f.value) === target)
+  );
+}
+
+/** Códigos que apareceram em campos de lead com cara de cupom (cupom/discount/promo),
+    para registrar com um clique os que você ainda não cadastrou. */
+export function detectedCoupons(s: DbState, eventId: string): { code: string; count: number }[] {
+  const counts = new Map<string, number>();
+  for (const a of attendeesOf(s, eventId)) {
+    if (a.status === "cancelado") continue;
+    for (const f of a.lead_fields ?? []) {
+      if (!/cupom|coupon|desconto|discount|promo|voucher/i.test(f.key + " " + f.label)) continue;
+      const code = couponNorm(f.value);
+      if (!code || code.length < 2 || code.length > 40) continue;
+      counts.set(code, (counts.get(code) ?? 0) + 1);
+    }
+  }
+  return [...counts.entries()]
+    .map(([code, count]) => ({ code, count }))
+    .sort((a, b) => b.count - a.count);
+}
 
 /** Contadores da sidebar (eventos ativos, inscritos do workspace, tarefas abertas). */
 export function sidebarCounts(s: DbState) {

@@ -22,6 +22,21 @@ export function fmtDateShort(iso: string | null): string {
   return `${String(d.getDate()).padStart(2, "0")} ${MONTHS[d.getMonth()]}`;
 }
 
+/** Intervalo compacto de datas: "21–23 ago · 2026" ou "28 ago – 02 set · 2026". */
+export function fmtDateRange(startIso: string, endIso: string): string {
+  const a = parseLocal(startIso);
+  const b = parseLocal(endIso);
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return fmtDate(startIso);
+  const dd = (d: Date) => String(d.getDate()).padStart(2, "0");
+  if (a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear()) {
+    return `${dd(a)}–${dd(b)} ${MONTHS[a.getMonth()]} · ${a.getFullYear()}`;
+  }
+  if (a.getFullYear() === b.getFullYear()) {
+    return `${dd(a)} ${MONTHS[a.getMonth()]} – ${dd(b)} ${MONTHS[b.getMonth()]} · ${a.getFullYear()}`;
+  }
+  return `${dd(a)} ${MONTHS[a.getMonth()]} ${a.getFullYear()} – ${dd(b)} ${MONTHS[b.getMonth()]} ${b.getFullYear()}`;
+}
+
 export function fmtDateTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";

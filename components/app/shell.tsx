@@ -73,29 +73,31 @@ const UiCtx = createContext<{ openNewEvent: () => void }>({ openNewEvent: () => 
 export const useUi = () => useContext(UiCtx);
 
 /* ---------- Sidebar ---------- */
-type SubmenuItem = { label: string; icon: string; tab?: string };
+/** Item de submenu: `path` navega para uma subpágina real; `tab` troca a aba da
+    view do pai (via query + CustomEvent); sem ambos, vai para a raiz do módulo. */
+type SubmenuItem = { label: string; icon: string; tab?: string; path?: string };
 
 const SUBMENUS: Record<string, SubmenuItem[]> = {
   eventos: [
     { label: "Todos os eventos", icon: "grid" },
-    { label: "Páginas de inscrição", icon: "link" },
-    { label: "Ingressos & lotes", icon: "ticket" },
-    { label: "Programação", icon: "calendarDays" },
-    { label: "Capas & branding", icon: "image" },
+    { label: "Páginas de inscrição", icon: "link", path: "/events/paginas" },
+    { label: "Ingressos & lotes", icon: "ticket", path: "/events/ingressos" },
+    { label: "Programação", icon: "calendarDays", path: "/events/programacao" },
+    { label: "Capas & branding", icon: "image", path: "/events/branding" },
   ],
   inscritos: [
     { label: "Lista de inscritos", icon: "users" },
     { label: "Check-in", icon: "checkSquare", tab: "checkin" },
-    { label: "Credenciais & crachás", icon: "ticket" },
-    { label: "Listas & segmentos", icon: "filter" },
-    { label: "Comunicação", icon: "mail" },
+    { label: "Credenciais & crachás", icon: "ticket", path: "/inscritos/credenciais" },
+    { label: "Listas & segmentos", icon: "filter", path: "/inscritos/segmentos" },
+    { label: "Comunicação", icon: "mail", path: "/inscritos/comunicacao" },
   ],
   financeiro: [
     { label: "Visão geral", icon: "grid" },
-    { label: "Transações", icon: "wallet" },
-    { label: "Repasses & saques", icon: "download" },
-    { label: "Cupons & descontos", icon: "ticket" },
-    { label: "Notas fiscais", icon: "note" },
+    { label: "Transações", icon: "wallet", path: "/financeiro/transacoes" },
+    { label: "Repasses & saques", icon: "download", path: "/financeiro/repasses" },
+    { label: "Cupons & descontos", icon: "ticket", path: "/financeiro/cupons" },
+    { label: "Notas fiscais", icon: "note", path: "/financeiro/notas" },
   ],
   checklist: [
     { label: "Todas as tarefas", icon: "grid", tab: "todas" },
@@ -115,11 +117,12 @@ type NavItem = {
 };
 
 function Sidebar({ active, onNav, open, collapsed, onToggleCollapse }: {
-  active: string; onNav: (id: string, query?: string) => void; open: boolean; collapsed: boolean;
+  active: string; onNav: (id: string, query?: string, path?: string) => void; open: boolean; collapsed: boolean;
   onToggleCollapse: () => void;
 }) {
   const db = useDb();
   const router = useRouter();
+  const pathname = usePathname();
   const counts = sidebarCounts(db);
   const user = currentUser(db);
   const [openSubs, setOpenSubs] = useState<Record<string, boolean>>({});
@@ -127,17 +130,19 @@ function Sidebar({ active, onNav, open, collapsed, onToggleCollapse }: {
 
   const subOpen = (id: string) => openSubs[id] ?? id === active;
   const toggleSub = (id: string) => setOpenSubs((state) => ({ ...state, [id]: !subOpen(id) }));
-  const navSub = (parent: string, tab?: string) => {
-    onNav(parent, tab ? `tab=${tab}` : undefined);
+  const navSub = (parent: string, sub: SubmenuItem) => {
+    onNav(parent, sub.tab ? `tab=${sub.tab}` : undefined, sub.path);
+    // Escolheu uma subpágina: recolhe o submenu — a sidebar volta ao repouso.
+    setOpenSubs((state) => ({ ...state, [parent]: false }));
     if (collapsed) {
       setDismissedFlyout(parent);
       (document.activeElement as HTMLElement | null)?.blur();
     }
-    if (parent === "inscritos") {
-      window.dispatchEvent(new CustomEvent("nexo:tab", { detail: tab ?? "todos" }));
+    if (!sub.path && parent === "inscritos") {
+      window.dispatchEvent(new CustomEvent("nexo:tab", { detail: sub.tab ?? "todos" }));
     }
-    if (parent === "checklist") {
-      window.dispatchEvent(new CustomEvent("nexo:checklist", { detail: tab ?? "todas" }));
+    if (!sub.path && parent === "checklist") {
+      window.dispatchEvent(new CustomEvent("nexo:checklist", { detail: sub.tab ?? "todas" }));
     }
   };
 
@@ -173,8 +178,11 @@ function Sidebar({ active, onNav, open, collapsed, onToggleCollapse }: {
           className="sb-row"
           data-active={active === it.id ? "true" : "false"}
           onClick={() => {
-            onNav(it.id);
-            if (hasSub) setOpenSubs((state) => ({ ...state, [it.id]: true }));
+            // Com subpáginas, o 1º clique só expande/recolhe — a navegação fica
+            // nos itens do submenu. Colapsada, o flyout abre por hover, então
+            // o clique navega direto.
+            if (hasSub && !collapsed) toggleSub(it.id);
+            else onNav(it.id);
           }}
         >
           <span className="sb-ico"><Icon name={it.icon} /></span>
@@ -196,17 +204,22 @@ function Sidebar({ active, onNav, open, collapsed, onToggleCollapse }: {
         {showSubmenu && (
           <div className="sb-sublist">
             <span className="sb-subline" />
-            {SUBMENUS[it.id].map((sub) => (
-              <button
-                key={sub.label}
-                className="sb-row sb-sub"
-                title={collapsed ? sub.label : undefined}
-                onClick={() => navSub(it.id, sub.tab)}
-              >
-                <span className="sb-ico"><Icon name={sub.icon} size={15} /></span>
-                <span className="sb-text">{sub.label}</span>
-              </button>
-            ))}
+            {SUBMENUS[it.id].map((sub) => {
+              const subActive = sub.path
+                ? pathname === sub.path
+                : !sub.tab && pathname === ROUTES[it.id];
+              return (
+                <button
+                  key={sub.label}
+                  className={"sb-row sb-sub" + (subActive ? " sub-active" : "")}
+                  title={collapsed ? sub.label : undefined}
+                  onClick={() => navSub(it.id, sub)}
+                >
+                  <span className="sb-ico"><Icon name={sub.icon} size={15} /></span>
+                  <span className="sb-text">{sub.label}</span>
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
@@ -622,10 +635,10 @@ export function AppShell({ children }: { children: ReactNode }) {
     document.querySelector(".content")?.scrollTo({ top: 0 });
   }, [pathname]);
 
-  const go = (id: string, query?: string) => {
+  const go = (id: string, query?: string, path?: string) => {
     setMenuOpen(false);
-    const path = ROUTES[id] || ROUTES.dashboard;
-    router.push(query ? `${path}?${query}` : path);
+    const base = path ?? ROUTES[id] ?? ROUTES.dashboard;
+    router.push(query ? `${base}?${query}` : base);
   };
 
   if (!ready || authed === null) return null; // carregando workspace

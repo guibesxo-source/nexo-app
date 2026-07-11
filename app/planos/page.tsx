@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import { getCurrentSubscription } from "@/lib/billing/server";
-import { isEntitled, isTrialing, trialDaysLeft } from "@/lib/billing/entitlement";
+import { FREE_BETA, isEntitled, isTrialing, trialDaysLeft } from "@/lib/billing/entitlement";
 import { FOUNDER_PLAN, type Cycle } from "@/lib/billing/plan";
 import { PlanSelector } from "./plan-selector";
 
@@ -38,7 +38,12 @@ export default async function PlanosPage({
           Nexo
         </div>
 
-        {active ? (
+        {FREE_BETA ? (
+          <div className="mb-5 rounded-md border border-green/30 bg-green-soft px-4 py-3 text-center text-[13px] font-semibold text-green-deep">
+            O Nexo está <b>gratuito no beta</b> — pagar é opcional. Quer travar o preço de
+            fundador (R$ 49/mês para sempre)? Os planos abaixo funcionam normalmente.
+          </div>
+        ) : active ? (
           <div className="mb-5 rounded-md border border-green/30 bg-green-soft px-4 py-3 text-center text-[13px] font-semibold text-green-deep">
             Sua assinatura está ativa. <Link href="/dashboard" className="underline">Ir para o app →</Link>
           </div>
@@ -55,7 +60,9 @@ export default async function PlanosPage({
         <PlanSelector initialCycle={initialCycle} />
 
         <p className="mx-auto mt-5 max-w-sm text-center text-[12px] text-faint">
-          {FOUNDER_PLAN.tagline}
+          {FREE_BETA
+            ? "Sem pressa: o beta segue gratuito e você será avisado antes de qualquer cobrança obrigatória."
+            : FOUNDER_PLAN.tagline}
         </p>
 
         <p className="mt-4 text-center text-[12px] text-faint">

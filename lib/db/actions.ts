@@ -4,11 +4,15 @@
 
 import type {
   Activity,
+  AgendaItem,
   Attendee,
   AttendeeStatus,
   AppSettings,
   ChecklistTemplate,
   ChecklistTemplateItem,
+  CommLogEntry,
+  CommTemplate,
+  Coupon,
   CustomMetric,
   DashboardConfig,
   DashboardWidget,
@@ -18,10 +22,12 @@ import type {
   EventPriority,
   IngestEndpoint,
   Member,
+  SavedSegment,
   SymplaEventLink,
   Task,
   TaskAttachment,
   TaskPhase,
+  TicketBatch,
   TicketType,
   Transaction,
   TxKind,
@@ -1373,5 +1379,237 @@ export function setToggle(key: string, value: boolean) {
     ...s,
     settings: { ...s.settings, toggles: { ...s.settings.toggles, [key]: value } },
   }));
+  saveSettings();
+}
+
+/** Define/remove o último dia de um evento com mais de um dia (YYYY-MM-DD). */
+export function setEventEnd(eventId: string, endsOn: string | null) {
+  mutate((s) => {
+    const map = { ...(s.settings.event_ends ?? {}) };
+    if (endsOn) map[eventId] = endsOn;
+    else delete map[eventId];
+    return { ...s, settings: { ...s.settings, event_ends: map } };
+  });
+  saveSettings();
+}
+
+/* ---------- Programação do evento (agenda) ---------- */
+
+export type AgendaDraft = Omit<AgendaItem, "id" | "event_id">;
+
+function agendaMap(s: { settings: AppSettings }): Record<string, AgendaItem[]> {
+  return { ...(s.settings.agenda_items ?? {}) };
+}
+
+export function addAgendaItem(eventId: string, draft: AgendaDraft): string {
+  const id = newId();
+  const item: AgendaItem = { ...draft, id, event_id: eventId };
+  mutate((s) => {
+    const map = agendaMap(s);
+    map[eventId] = [...(map[eventId] ?? []), item];
+    return { ...s, settings: { ...s.settings, agenda_items: map } };
+  });
+  saveSettings();
+  logActivity("🗓️", ["Bloco ", draft.title, " adicionado à programação"]);
+  return id;
+}
+
+export function updateAgendaItem(eventId: string, id: string, patch: Partial<AgendaDraft>) {
+  mutate((s) => {
+    const map = agendaMap(s);
+    map[eventId] = (map[eventId] ?? []).map((it) => (it.id === id ? { ...it, ...patch } : it));
+    return { ...s, settings: { ...s.settings, agenda_items: map } };
+  });
+  saveSettings();
+}
+
+export function removeAgendaItem(eventId: string, id: string) {
+  mutate((s) => {
+    const map = agendaMap(s);
+    if (map[eventId]) map[eventId] = map[eventId].filter((it) => it.id !== id);
+    return { ...s, settings: { ...s.settings, agenda_items: map } };
+  });
+  saveSettings();
+}
+
+/* ---------- Ingressos & lotes (planejamento; a venda fica no ticketing) ---------- */
+
+export type TicketBatchDraft = Omit<TicketBatch, "id" | "event_id" | "created_at">;
+
+function batchesMap(s: { settings: AppSettings }): Record<string, TicketBatch[]> {
+  return { ...(s.settings.ticket_batches ?? {}) };
+}
+
+export function addTicketBatch(eventId: string, draft: TicketBatchDraft): string {
+  const id = newId();
+  const batch: TicketBatch = { ...draft, id, event_id: eventId, created_at: now() };
+  mutate((s) => {
+    const map = batchesMap(s);
+    map[eventId] = [...(map[eventId] ?? []), batch];
+    return { ...s, settings: { ...s.settings, ticket_batches: map } };
+  });
+  saveSettings();
+  logActivity("🎫", ["Lote ", draft.name, " criado"]);
+  return id;
+}
+
+export function updateTicketBatch(eventId: string, id: string, patch: Partial<TicketBatchDraft>) {
+  mutate((s) => {
+    const map = batchesMap(s);
+    map[eventId] = (map[eventId] ?? []).map((b) => (b.id === id ? { ...b, ...patch } : b));
+    return { ...s, settings: { ...s.settings, ticket_batches: map } };
+  });
+  saveSettings();
+}
+
+export function removeTicketBatch(eventId: string, id: string) {
+  mutate((s) => {
+    const map = batchesMap(s);
+    if (map[eventId]) map[eventId] = map[eventId].filter((b) => b.id !== id);
+    return { ...s, settings: { ...s.settings, ticket_batches: map } };
+  });
+  saveSettings();
+}
+
+/* ---------- Segmentos salvos de inscritos ---------- */
+
+export type SavedSegmentDraft = Omit<SavedSegment, "id" | "event_id" | "created_at">;
+
+export function saveSegment(eventId: string, draft: SavedSegmentDraft): string {
+  const id = newId();
+  const seg: SavedSegment = { ...draft, id, event_id: eventId, created_at: now() };
+  mutate((s) => ({
+    ...s,
+    settings: { ...s.settings, saved_segments: [seg, ...(s.settings.saved_segments ?? [])] },
+  }));
+  saveSettings();
+  logActivity("🔎", ["Segmento ", draft.name, " salvo"]);
+  return id;
+}
+
+export function removeSegment(id: string) {
+  mutate((s) => ({
+    ...s,
+    settings: {
+      ...s.settings,
+      saved_segments: (s.settings.saved_segments ?? []).filter((seg) => seg.id !== id),
+    },
+  }));
+  saveSettings();
+}
+
+/* ---------- Comunicação (modelos + histórico; o envio fica na ferramenta do usuário) ---------- */
+
+/** Modelos genéricos prontos — variáveis: {{nome}}, {{evento}}, {{data}}, {{local}}. */
+export const BUILTIN_COMM_TEMPLATES: CommTemplate[] = [
+  {
+    id: "comm-confirm",
+    name: "Confirmação de inscrição",
+    channel: "email",
+    subject: "Sua vaga no {{evento}} está garantida",
+    body:
+      "Olá {{nome}}!\n\nSua inscrição no {{evento}} foi confirmada.\n\n📅 Data: {{data}}\n📍 Local: {{local}}\n\nGuarde este e-mail — nos vemos lá!",
+    builtin: true,
+    created_at: "2026-01-01T00:00:00.000Z",
+  },
+  {
+    id: "comm-reminder",
+    name: "Lembrete de véspera",
+    channel: "whatsapp",
+    body:
+      "Oi {{nome}}! Passando pra lembrar que amanhã tem {{evento}} 🎉\n📅 {{data}} · 📍 {{local}}\nPosso contar com a sua presença?",
+    builtin: true,
+    created_at: "2026-01-01T00:00:00.000Z",
+  },
+  {
+    id: "comm-post",
+    name: "Pós-evento + pesquisa",
+    channel: "email",
+    subject: "Obrigado por participar do {{evento}}",
+    body:
+      "Olá {{nome}},\n\nObrigado por participar do {{evento}}! Sua presença fez a diferença.\n\nNos ajude a melhorar respondendo a pesquisa rápida (2 min): [link da pesquisa]\n\nAté a próxima!",
+    builtin: true,
+    created_at: "2026-01-01T00:00:00.000Z",
+  },
+];
+
+export type CommTemplateDraft = Omit<CommTemplate, "id" | "created_at" | "builtin">;
+
+export function addCommTemplate(draft: CommTemplateDraft): string {
+  const id = newId();
+  const tpl: CommTemplate = { ...draft, id, created_at: now() };
+  mutate((s) => ({
+    ...s,
+    settings: { ...s.settings, comm_templates: [tpl, ...(s.settings.comm_templates ?? [])] },
+  }));
+  saveSettings();
+  return id;
+}
+
+export function removeCommTemplate(id: string) {
+  mutate((s) => ({
+    ...s,
+    settings: {
+      ...s.settings,
+      comm_templates: (s.settings.comm_templates ?? []).filter((t) => t.id !== id),
+    },
+  }));
+  saveSettings();
+}
+
+export type CommLogDraft = Omit<CommLogEntry, "id" | "event_id" | "sent_at">;
+
+export function logCommunication(eventId: string, draft: CommLogDraft): string {
+  const id = newId();
+  const entry: CommLogEntry = { ...draft, id, event_id: eventId, sent_at: now() };
+  mutate((s) => ({
+    ...s,
+    settings: { ...s.settings, comm_log: [entry, ...(s.settings.comm_log ?? [])].slice(0, 200) },
+  }));
+  saveSettings();
+  logActivity("✉️", [
+    "Comunicação ",
+    draft.subject,
+    ` registrada · ${draft.count} destinatário${draft.count === 1 ? "" : "s"}`,
+  ]);
+  return id;
+}
+
+/* ---------- Cupons & descontos ---------- */
+
+export type CouponDraft = Omit<Coupon, "id" | "event_id" | "created_at">;
+
+function couponsMap(s: { settings: AppSettings }): Record<string, Coupon[]> {
+  return { ...(s.settings.coupons ?? {}) };
+}
+
+export function addCoupon(eventId: string, draft: CouponDraft): string {
+  const id = newId();
+  const coupon: Coupon = { ...draft, id, event_id: eventId, created_at: now() };
+  mutate((s) => {
+    const map = couponsMap(s);
+    map[eventId] = [coupon, ...(map[eventId] ?? [])];
+    return { ...s, settings: { ...s.settings, coupons: map } };
+  });
+  saveSettings();
+  logActivity("🏷️", ["Cupom ", draft.code, " registrado"]);
+  return id;
+}
+
+export function updateCoupon(eventId: string, id: string, patch: Partial<CouponDraft>) {
+  mutate((s) => {
+    const map = couponsMap(s);
+    map[eventId] = (map[eventId] ?? []).map((c) => (c.id === id ? { ...c, ...patch } : c));
+    return { ...s, settings: { ...s.settings, coupons: map } };
+  });
+  saveSettings();
+}
+
+export function removeCoupon(eventId: string, id: string) {
+  mutate((s) => {
+    const map = couponsMap(s);
+    if (map[eventId]) map[eventId] = map[eventId].filter((c) => c.id !== id);
+    return { ...s, settings: { ...s.settings, coupons: map } };
+  });
   saveSettings();
 }
