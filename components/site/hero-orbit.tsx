@@ -12,52 +12,14 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-/* ---------- Typewriter do headline ----------
-   Digita o h1 caractere a caractere (35ms/char, 400ms de atraso) com um
-   cursor verde piscando. Um "fantasma" invisível reserva o espaço final
-   pra não haver layout shift. A palavra "hub" sai em verde. */
-
-const HEADLINE = "O hub que faz os seus eventos acontecerem.";
-const GREEN_START = 2; // "hub"
-const GREEN_END = 5;
+/* ---------- Headline do hero ----------
+   Estática, com a assinatura da marca (pill verde −1°) na palavra "hub".
+   Entra junto do reveal padrão da página — sem efeito de digitação. */
 
 export function TypewriterHeading() {
-  const [n, setN] = useState(0);
-  const done = n >= HEADLINE.length;
-
-  useEffect(() => {
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      setN(HEADLINE.length);
-      return;
-    }
-    let i = 0;
-    let interval: ReturnType<typeof setInterval>;
-    const start = setTimeout(() => {
-      interval = setInterval(() => {
-        i += 1;
-        setN(i);
-        if (i >= HEADLINE.length) clearInterval(interval);
-      }, 35);
-    }, 400);
-    return () => {
-      clearTimeout(start);
-      clearInterval(interval);
-    };
-  }, []);
-
-  const typed = HEADLINE.slice(0, n);
   return (
-    <h1 className="tw-h1 relative mx-auto mt-6 max-w-[16ch] text-[clamp(38px,5.4vw,64px)] font-extrabold leading-[1.05] tracking-[-0.035em] lg:mx-0">
-      {/* fantasma: reserva a altura final */}
-      <span className="invisible" aria-hidden>
-        {HEADLINE}
-      </span>
-      <span className="absolute inset-0" aria-label={HEADLINE}>
-        <span>{typed.slice(0, GREEN_START)}</span>
-        <span className="text-green">{typed.slice(GREEN_START, GREEN_END)}</span>
-        <span>{typed.slice(GREEN_END)}</span>
-        {!done && <span className="tw-caret" aria-hidden />}
-      </span>
+    <h1 className="reveal mx-auto mt-6 max-w-[16ch] text-[clamp(38px,5.4vw,64px)] font-extrabold leading-[1.08] tracking-[-0.035em] lg:mx-0">
+      O <span className="mark-pill">hub</span> que faz os seus eventos acontecerem.
     </h1>
   );
 }

@@ -10,6 +10,13 @@
   color: #0a0a0a;
 }
 
+/* Display Archivo só em headlines (h1/h2) — Inter segue no resto.
+   É a assinatura tipográfica que tira a LP do look "Inter em tudo". */
+.site h1,
+.site h2 {
+  font-family: var(--font-archivo), var(--font-inter), system-ui, sans-serif;
+}
+
 /* Rolagem suave nas âncoras (#precos, #como-funciona…) com folga pra nav fixa. */
 html:has(.site) {
   scroll-behavior: smooth;
@@ -26,7 +33,6 @@ html:has(.site) {
   border-radius: 12px;
   display: inline-block;
   transform: rotate(-1deg);
-  box-shadow: 0 10px 34px rgba(0, 228, 124, 0.28);
 }
 
 /* Eyebrow: pill com ponto pulsante. */
@@ -39,6 +45,8 @@ html:has(.site) {
   letter-spacing: 0.16em;
   text-transform: uppercase;
 }
+/* Ponto-com-anel estático (assinatura da marca). Sem pulso: a regra da casa é
+   "animação verde só quando algo aconteceu de verdade". */
 .eyebrow::before {
   content: "";
   width: 7px;
@@ -46,11 +54,6 @@ html:has(.site) {
   border-radius: 99px;
   background: #00e47c;
   box-shadow: 0 0 0 4px rgba(0, 228, 124, 0.18);
-  animation: pulse 2.4s var(--ease) infinite;
-}
-@keyframes pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.55; transform: scale(0.82); }
 }
 
 /* Nav fixa com vidro. */
@@ -125,36 +128,38 @@ html:has(.site) {
   -webkit-mask-image: radial-gradient(ellipse 80% 70% at 50% 30%, black 30%, transparent 78%);
 }
 
-/* MARQUEE — faixa preta rolando (escassez honesta). */
-.marquee {
-  overflow: hidden;
+/* FAIXA "SUBSTITUI" — barra preta estática logo abaixo do hero: diz, em uma
+   linha, o que o Nexo tira da frente do usuário. Informação, não efeito. */
+.replaces {
   background: #050505;
   color: #fff;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
-.marquee-track {
-  display: inline-flex;
-  align-items: center;
-  gap: 26px;
-  white-space: nowrap;
-  padding: 16px 0;
-  animation: marquee 32s linear infinite;
-  will-change: transform;
+.replaces-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 22px;
+  row-gap: 6px;
+  padding: 18px 24px;
+  max-width: var(--site-max);
+  margin: 0 auto;
 }
-.marquee-track span {
-  font-weight: 700;
-  font-size: 14px;
-  letter-spacing: -0.01em;
-  color: rgba(255, 255, 255, 0.82);
-}
-.marquee-track i {
+.replaces-label {
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
   color: #00e47c;
-  font-style: normal;
 }
-@keyframes marquee {
-  from { transform: translateX(0); }
-  to { transform: translateX(-50%); }
+.replaces-row span {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.72);
+  text-decoration: line-through;
+  text-decoration-color: rgba(0, 228, 124, 0.55);
+  text-decoration-thickness: 1.5px;
 }
 
 /* Janela de navegador do showcase. */
@@ -196,7 +201,7 @@ html:has(.site) {
 @keyframes reveal { to { opacity: 1; transform: none; } }
 
 @media (prefers-reduced-motion: reduce) {
-  .marquee-track, .bars i, .eyebrow::before { animation: none; }
+  .bars i { animation: none; }
   .reveal { opacity: 1; transform: none; animation: none; }
 }
 
@@ -222,27 +227,21 @@ html:has(.site) {
 
 .price-featured {
   background:
-    radial-gradient(120% 90% at 85% -10%, rgba(0, 228, 124, 0.26), transparent 55%),
-    radial-gradient(90% 70% at -10% 110%, rgba(0, 184, 99, 0.16), transparent 60%),
-    linear-gradient(160deg, #0d0d0c, #0a0a0a 55%, #10120f);
+    radial-gradient(120% 90% at 85% -10%, rgba(0, 228, 124, 0.1), transparent 55%),
+    #050505;
   border: 1px solid rgba(0, 228, 124, 0.28);
   box-shadow: 0 24px 70px -32px rgba(0, 228, 124, 0.4), var(--shadow-lg);
 }
+/* Brilho estático e discreto no card em destaque — sem loop decorativo. */
 .price-glow {
   position: absolute;
   inset: -40%;
   pointer-events: none;
-  background: radial-gradient(closest-side, rgba(0, 228, 124, 0.14), transparent 70%);
-  animation: priceGlow 9s ease-in-out infinite alternate;
-}
-@keyframes priceGlow {
-  from { transform: translate3d(-8%, -6%, 0) scale(1); }
-  to { transform: translate3d(10%, 8%, 0) scale(1.18); }
+  background: radial-gradient(closest-side, rgba(0, 228, 124, 0.1), transparent 70%);
 }
 
 @media (prefers-reduced-motion: reduce) {
   .price-grid .price-card { opacity: 1; animation: none; transition: none; }
-  .price-glow { animation: none; }
 }
 
 /* ---------- Planos "bloqueados" (opcional no beta) ----------
@@ -268,7 +267,6 @@ html:has(.site) {
   background: rgba(0, 228, 124, 0.08);
   padding: 4px 12px;
   border-radius: 999px;
-  box-shadow: 0 0 26px rgba(0, 228, 124, 0.15);
 }
 .hero-free::before {
   content: "";
@@ -276,7 +274,6 @@ html:has(.site) {
   height: 6px;
   border-radius: 99px;
   background: #00e47c;
-  animation: pulse 2.4s var(--ease) infinite;
 }
 
 /* ---------- Hero vivo (HeroFX) ----------
@@ -331,54 +328,54 @@ html:has(.site) {
 
 @media (prefers-reduced-motion: reduce) {
   .hero-orb { animation: none; translate: none; transition: none; }
-  .hero-free::before { animation: none; }
   .price-locked { transition: none; }
 }
 
-/* ---------- Typewriter do headline ---------- */
-.tw-caret {
-  display: inline-block;
-  width: 0.09em;
-  height: 0.82em;
-  margin-left: 0.06em;
-  vertical-align: -0.08em;
-  background: #00e47c;
-  animation: caretBlink 0.9s steps(2, start) infinite;
+/* ---------- FAQ (details/summary nativo) ---------- */
+.faq-item {
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: var(--shadow-sm);
+  transition: border-color 0.2s var(--ease);
 }
-@keyframes caretBlink {
-  50% { opacity: 0; }
+.faq-item[open] {
+  border-color: rgba(0, 228, 124, 0.5);
 }
-
-/* ---------- CTA com borda giratória (conic-gradient) ---------- */
-@property --border-angle {
-  syntax: "<angle>";
-  inherits: false;
-  initial-value: 0deg;
+.faq-item summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 22px;
+  font-size: 15.5px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
-.btn-spin {
-  position: relative;
+.faq-item summary::-webkit-details-marker { display: none; }
+.faq-item summary::after {
+  content: "+";
+  flex: none;
+  width: 26px;
+  height: 26px;
   display: inline-flex;
-  border-radius: 999px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 99px;
+  background: #0a0a0a;
+  color: #00e47c;
+  font-weight: 800;
+  transition: rotate 0.2s var(--ease);
 }
-.btn-spin::before {
-  content: "";
-  position: absolute;
-  inset: -3px;
-  border-radius: 999px;
-  padding: 3px;
-  background: conic-gradient(
-    from var(--border-angle),
-    #00e47c, #050505 28%, #00e47c 50%, #050505 78%, #00e47c
-  );
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  mask-composite: exclude;
-  animation: borderSpin 3s linear infinite;
-  pointer-events: none;
-}
-@keyframes borderSpin {
-  to { --border-angle: 360deg; }
+.faq-item[open] summary::after { rotate: 45deg; }
+.faq-item > p {
+  padding: 0 22px 20px;
+  max-width: 68ch;
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--color-muted, #555);
 }
 
 /* ---------- Órbitas do hub (hero direita) ----------
@@ -439,7 +436,6 @@ html:has(.site) {
     radial-gradient(70% 70% at 50% 30%, rgba(0, 228, 124, 0.14), transparent 70%),
     #0a0a0a;
   border: 1px solid rgba(0, 228, 124, 0.25);
-  box-shadow: 0 0 70px rgba(0, 228, 124, 0.18);
 }
 .hub-mark {
   width: 12px;
@@ -466,13 +462,13 @@ html:has(.site) {
   color: rgba(255, 255, 255, 0.88);
   background: rgba(10, 10, 10, 0.92);
   border: 1px solid rgba(0, 228, 124, 0.3);
-  box-shadow: 0 0 26px rgba(0, 228, 124, 0.16), 0 14px 34px -16px rgba(0, 0, 0, 0.8);
+  box-shadow: 0 14px 34px -16px rgba(0, 0, 0, 0.8);
   opacity: 0;
-  animation: satIn 0.7s var(--ease) forwards;
+  animation: satIn 0.5s var(--ease) forwards;
 }
 @keyframes satIn {
-  from { opacity: 0; transform: scale(0.3) rotate(-180deg); filter: blur(8px); }
-  to { opacity: 1; transform: none; filter: none; }
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
 }
 
 @media (max-width: 1279px) { .orbits-box { --os: 0.85; } }
@@ -480,7 +476,6 @@ html:has(.site) {
 @media (max-width: 639px) { .orbits-box { --os: 0.52; } }
 
 @media (prefers-reduced-motion: reduce) {
-  .tw-caret, .btn-spin::before { animation: none; }
   .orbits .cw, .orbits .ccw, .sat-spin.cw, .sat-spin.ccw { animation: none; }
   .sat-chip { animation: none; opacity: 1; }
 }
